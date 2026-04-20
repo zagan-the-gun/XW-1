@@ -1,6 +1,9 @@
-# Jukebox (XW-1)
+# Dead Beef Saloon（死んだ牛の酒場） / `0xDEADBEEF`
+
+> *Dead Beef Saloon — where strangers buy the night a drink.*
 
 YouTube / SoundCloud / ニコニコ動画のURLをキューに追加して再生できるジュークボックスWebサービス。
+コードネームは `0xDEADBEEF`（開発者おなじみのマジックナンバー）。
 
 - ソロモード: 自分だけのBGMプレイリスト
 - パーティモード: ルームURLを共有してみんなで曲を追加（ホスト再生 / 同期再生）
