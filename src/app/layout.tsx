@@ -2,9 +2,23 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Jukebox — 仲間と流すBGM",
+  title: "Dead Beef Saloon — 死んだ牛の酒場",
   description:
-    "YouTube / SoundCloud / ニコニコ動画を自由にキューに追加できるジュークボックス。作業BGMからパーティまで。",
+    "0xDEADBEEF。YouTube / SoundCloud / ニコニコ動画のURLを投げ込んで、仲間とひと晩のBGMを持ち寄るジュークボックス酒場。",
+  openGraph: {
+    title: "Dead Beef Saloon — 死んだ牛の酒場",
+    description:
+      "0xDEADBEEF。URLを一本投げ込めば、今夜の一曲が始まる。YouTube / SoundCloud / ニコニコ対応の共有ジュークボックス。",
+    siteName: "Dead Beef Saloon",
+    locale: "ja_JP",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Dead Beef Saloon — 死んだ牛の酒場",
+    description:
+      "0xDEADBEEF。URLを一本投げ込めば、今夜の一曲が始まる共有ジュークボックス。",
+  },
 };
 
 export const viewport: Viewport = {
