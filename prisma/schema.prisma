@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Platform {
+  YOUTUBE
+  SOUNDCLOUD
+  NICONICO
+}
+
+enum RoomMode {
+  SOLO
+  PARTY
+}
+
+enum PlaybackMode {
+  HOST
+  SYNC
+}
+
+enum TrackStatus {
+  QUEUED
+  PLAYING
+  PLAYED
+  SKIPPED
+}
+
+model User {
+  id         String   @id @default(cuid())
+  name       String
+  email      String?  @unique
+  avatarUrl  String?
+  createdAt  DateTime @default(now())
+
+  hostedRooms Room[]  @relation("HostedRooms")
+  addedTracks Track[] @relation("AddedTracks")
+}
+
+model Room {
+  id           String       @id @default(cuid())
+  name         String
+  slug         String       @unique
+  hostId       String?
+  mode         RoomMode     @default(SOLO)
+  playbackMode PlaybackMode @default(HOST)
+  isPublic     Boolean      @default(false)
+  loopPlayback Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  host    User?   @relation("HostedRooms", fields: [hostId], references: [id], onDelete: SetNull)
+  tracks  Track[]
+
+  @@index([createdAt])
+}
+
+model Track {
+  id          String      @id @default(cuid())
+  roomId      String
+  addedById   String?
+  url         String
+  platform    Platform
+  externalId  String
+  title       String
+  thumbnail   String?
+  durationSec Int?
+  position    Int
+  status      TrackStatus @default(QUEUED)
+  addedAt     DateTime    @default(now())
+
+  room    Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  addedBy User? @relation("AddedTracks", fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@index([roomId, position])
+  @@index([roomId, status])
+}
