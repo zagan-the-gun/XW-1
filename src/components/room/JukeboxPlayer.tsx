@@ -177,6 +177,13 @@ function NiconicoPlayer({
   // postMessage bridge: react to player events and issue play/pause commands.
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
+      // Debug: log anything that comes from our niconico iframe, regardless
+      // of whether we recognize the event shape. Helps diagnose whether the
+      // jsapi handshake succeeded at all.
+      if (ev.source === iframeRef.current?.contentWindow) {
+        // eslint-disable-next-line no-console
+        console.log("[nico→us]", { origin: ev.origin, data: ev.data });
+      }
       if (ev.origin !== NICO_ORIGIN) return;
       if (ev.source !== iframeRef.current?.contentWindow) return;
       const data = ev.data as unknown;
@@ -186,19 +193,15 @@ function NiconicoPlayer({
         data?: { playerStatus?: number };
       };
 
-      // Observed status codes: 1=before play, 2=playing, 3=paused, 4=ended.
-      // Be defensive and accept either 2 or 4 as "ended" across versions.
       if (d.eventName === "playerStatusChange") {
         const s = d.data?.playerStatus;
         if (s === 4) fireEnded();
       } else if (d.eventName === "ended" || d.eventName === "playerEnd") {
         fireEnded();
       } else if (d.eventName === "loadComplete" || d.eventName === "playerMetadataChange") {
-        // Kick off playback explicitly once the player is ready. Browsers
-        // often ignore the `autoplay=1` URL hint for cross-origin iframes,
-        // but a postMessage play command right after load usually succeeds
-        // as it inherits the parent page's user-gesture context.
         if (playingRef.current) {
+          // eslint-disable-next-line no-console
+          console.log("[us→nico] sending play command");
           iframeRef.current?.contentWindow?.postMessage(
             {
               eventName: "play",
@@ -226,6 +229,10 @@ function NiconicoPlayer({
       className="absolute inset-0 w-full h-full"
       allow="autoplay; encrypted-media; fullscreen"
       referrerPolicy="no-referrer-when-downgrade"
+      onLoad={() => {
+        // eslint-disable-next-line no-console
+        console.log("[nico iframe] onLoad fired for", track.externalId);
+      }}
     />
   );
 }
