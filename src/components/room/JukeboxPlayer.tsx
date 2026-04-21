@@ -157,10 +157,13 @@ function NiconicoPlayer({
     return () => window.clearTimeout(id);
   }, [track.id, track.durationSec, playing]);
 
-  // Bare embed URL - matching the snippet niconico's share menu emits.
-  // Adding query params (jsapi, playerId, continuous, etc.) tends to activate
-  // origin-restricted code paths and surface the "プレーヤーを更新…" error.
-  const src = `https://embed.nicovideo.jp/watch/${encodeURIComponent(track.externalId)}`;
+  // `autoplay=1` kicks off playback when the queue rotates to a niconico track.
+  // We deliberately avoid `jsapi=1` / `playerId=...` because they switch the
+  // embed into an origin-allowlist code path that rejects non-whitelisted
+  // hosts (including localhost) with "プレーヤーを更新…" errors.
+  const src =
+    `https://embed.nicovideo.jp/watch/${encodeURIComponent(track.externalId)}` +
+    `?autoplay=${playing ? 1 : 0}`;
 
   return (
     <iframe
