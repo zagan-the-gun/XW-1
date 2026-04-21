@@ -119,11 +119,17 @@ function platformLabel(platform: Track["platform"]) {
   }
 }
 
-// Niconico's embed player does not expose a stable public JS API from
-// third-party origins (jsapi=1 triggers an "update player" overlay on
-// non-whitelisted hosts), so we render the bare official iframe and rely on
-// `durationSec` (fetched via getthumbinfo at track add time) to auto-advance.
-// Users still control playback via the niconico controls inside the iframe.
+// Niconico's embed exposes a postMessage-based JS API when loaded with
+// `jsapi=1&playerId=<id>`. We use it to:
+//   - detect end-of-playback accurately (fallback: durationSec timer)
+//   - issue an explicit play() after loadComplete so we can auto-advance from
+//     one niconico track to the next without requiring a manual click.
+// Note: jsapi=1 only works from an origin that niconico accepts (i.e. public
+// HTTPS, not http://localhost). On localhost this path 403s in the player's
+// /play endpoint and surfaces the "プレーヤーを更新…" overlay.
+const NICO_PLAYER_ID = "xw1";
+const NICO_ORIGIN = "https://embed.nicovideo.jp";
+
 function NiconicoPlayer({
   track,
   playing,
@@ -133,40 +139,88 @@ function NiconicoPlayer({
   playing: boolean;
   onEnded: () => void;
 }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const onEndedRef = useRef(onEnded);
   const endedFiredRef = useRef(false);
+  const playingRef = useRef(playing);
 
   useEffect(() => {
     onEndedRef.current = onEnded;
   }, [onEnded]);
 
   useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+
+  useEffect(() => {
     endedFiredRef.current = false;
   }, [track.id]);
 
-  // Duration-based auto-advance. +3s buffer covers the overlay/intro offset.
+  const fireEnded = () => {
+    if (endedFiredRef.current) return;
+    endedFiredRef.current = true;
+    onEndedRef.current();
+  };
+
+  // Duration-based auto-advance as a safety net for cases where the player
+  // never sends an "ended" event (muted tab throttling, blocked postMessage,
+  // etc.). +3s buffer covers the niconico outro overlay.
   useEffect(() => {
     if (!playing) return;
     if (!track.durationSec) return;
     const ms = (track.durationSec + 3) * 1000;
-    const id = window.setTimeout(() => {
-      if (endedFiredRef.current) return;
-      endedFiredRef.current = true;
-      onEndedRef.current();
-    }, ms);
+    const id = window.setTimeout(fireEnded, ms);
     return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track.id, track.durationSec, playing]);
 
-  // `autoplay=1` kicks off playback when the queue rotates to a niconico track.
-  // We deliberately avoid `jsapi=1` / `playerId=...` because they switch the
-  // embed into an origin-allowlist code path that rejects non-whitelisted
-  // hosts (including localhost) with "プレーヤーを更新…" errors.
+  // postMessage bridge: react to player events and issue play/pause commands.
+  useEffect(() => {
+    const handler = (ev: MessageEvent) => {
+      if (ev.origin !== NICO_ORIGIN) return;
+      if (ev.source !== iframeRef.current?.contentWindow) return;
+      const data = ev.data as unknown;
+      if (!data || typeof data !== "object") return;
+      const d = data as {
+        eventName?: string;
+        data?: { playerStatus?: number };
+      };
+
+      // Observed status codes: 1=before play, 2=playing, 3=paused, 4=ended.
+      // Be defensive and accept either 2 or 4 as "ended" across versions.
+      if (d.eventName === "playerStatusChange") {
+        const s = d.data?.playerStatus;
+        if (s === 4) fireEnded();
+      } else if (d.eventName === "ended" || d.eventName === "playerEnd") {
+        fireEnded();
+      } else if (d.eventName === "loadComplete" || d.eventName === "playerMetadataChange") {
+        // Kick off playback explicitly once the player is ready. Browsers
+        // often ignore the `autoplay=1` URL hint for cross-origin iframes,
+        // but a postMessage play command right after load usually succeeds
+        // as it inherits the parent page's user-gesture context.
+        if (playingRef.current) {
+          iframeRef.current?.contentWindow?.postMessage(
+            {
+              eventName: "play",
+              sourceConnectorType: 1,
+              playerId: NICO_PLAYER_ID,
+            },
+            NICO_ORIGIN,
+          );
+        }
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
   const src =
     `https://embed.nicovideo.jp/watch/${encodeURIComponent(track.externalId)}` +
-    `?autoplay=${playing ? 1 : 0}`;
+    `?jsapi=1&playerId=${NICO_PLAYER_ID}&autoplay=1`;
 
   return (
     <iframe
+      ref={iframeRef}
       key={track.id}
       src={src}
       className="absolute inset-0 w-full h-full"
