@@ -119,6 +119,19 @@ isNico
 
 `forwardRef + useImperativeHandle` で親に `seekTo(seconds)` メソッドを公開。`RoomClient` が `sync_state` イベントを受けたときに呼ぶ。
 
+### マスター音量
+
+プレイヤー下部のコントロールバーに音量スライダー（0〜100）とミュートボタンを持つ。`JukeboxPlayer` 内の `useState` でローカル管理し、`localStorage` に永続化する。
+
+| キー | 値 |
+|---|---|
+| `xw1.player.volume` | `0.0`〜`1.0` の文字列 |
+| `xw1.player.muted` | `"1"` または `"0"` |
+
+`ReactPlayer` には `volume` / `muted` prop を渡すため、YouTube と SoundCloud に効く。曲が切り替わっても維持されるので「次の曲が突然爆音」を防ぐのが主目的。
+
+**ニコニコ動画は例外**: 埋め込みの `postMessage` API に音量コマンドが無いため、スライダーとミュートは `disabled` にし、`title` 属性で「プレイヤー内で調整してください」と案内する。
+
 ### ニコニコ動画プレイヤーの特殊事情
 
 ニコニコ動画の埋め込みは `https://embed.nicovideo.jp/watch/{id}?jsapi=1&playerId={id}&autoplay=1` を iframe で読み込む。`jsapi=1` でイベントAPIが有効化され、`postMessage` で双方向通信できる。

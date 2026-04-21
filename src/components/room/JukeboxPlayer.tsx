@@ -1,12 +1,16 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { Pause, Play, SkipForward, Disc3 } from "lucide-react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { Pause, Play, SkipForward, Disc3, Volume2, VolumeX } from "lucide-react";
 import type { Track } from "@prisma/client";
 import { Button } from "@/components/ui/Button";
 
 const ReactPlayer = dynamic(() => import("react-player/lazy"), { ssr: false });
+
+const VOLUME_STORAGE_KEY = "xw1.player.volume";
+const MUTED_STORAGE_KEY = "xw1.player.muted";
+const DEFAULT_VOLUME = 0.8;
 
 export type JukeboxPlayerHandle = {
   seekTo: (seconds: number) => void;
@@ -37,6 +41,48 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
 
   const isNico = track?.platform === "NICONICO";
 
+  // Master volume: persisted in localStorage so it survives track changes and
+  // reloads. Niconico is iframe-only (no volume postMessage API), so the
+  // slider only affects YouTube / SoundCloud via react-player's `volume` prop.
+  const [volume, setVolume] = useState(DEFAULT_VOLUME);
+  const [muted, setMuted] = useState(false);
+
+  useEffect(() => {
+    try {
+      const storedVolume = window.localStorage.getItem(VOLUME_STORAGE_KEY);
+      if (storedVolume !== null) {
+        const parsed = Number.parseFloat(storedVolume);
+        if (Number.isFinite(parsed)) {
+          setVolume(Math.min(1, Math.max(0, parsed)));
+        }
+      }
+      if (window.localStorage.getItem(MUTED_STORAGE_KEY) === "1") {
+        setMuted(true);
+      }
+    } catch {
+      // localStorage unavailable (private mode etc.); use defaults.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
+    } catch {
+      // ignore
+    }
+  }, [volume]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MUTED_STORAGE_KEY, muted ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [muted]);
+
+  const effectiveVolume = muted ? 0 : volume;
+  const sliderValue = Math.round(effectiveVolume * 100);
+
   return (
     <div>
       <div className="aspect-video w-full bg-black relative">
@@ -51,6 +97,8 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
               controls
               width="100%"
               height="100%"
+              volume={effectiveVolume}
+              muted={muted}
               onEnded={onEnded}
               onProgress={onProgress}
               progressInterval={1000}
@@ -91,6 +139,43 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
           <div className="text-xs text-muted-foreground truncate">
             {track ? platformLabel(track.platform) : "URLを貼ってキューに追加しましょう"}
           </div>
+        </div>
+        <div
+          className="flex items-center gap-2 shrink-0"
+          title={
+            isNico
+              ? "ニコニコ動画はプレイヤー内の音量で調整してください"
+              : undefined
+          }
+        >
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setMuted((m) => !m)}
+            disabled={isNico}
+            aria-label={muted ? "ミュート解除" : "ミュート"}
+          >
+            {muted || volume === 0 ? (
+              <VolumeX className="h-5 w-5" />
+            ) : (
+              <Volume2 className="h-5 w-5" />
+            )}
+          </Button>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={sliderValue}
+            onChange={(e) => {
+              const next = Number.parseInt(e.target.value, 10) / 100;
+              setVolume(next);
+              if (muted && next > 0) setMuted(false);
+            }}
+            disabled={isNico}
+            aria-label="音量"
+            className="w-20 sm:w-28 accent-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          />
         </div>
       </div>
     </div>
