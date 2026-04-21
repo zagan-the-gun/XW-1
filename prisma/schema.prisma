@@ -11,6 +11,8 @@ enum Platform {
   YOUTUBE
   SOUNDCLOUD
   NICONICO
+  VIMEO
+  WISTIA
 }
 
 enum RoomMode {

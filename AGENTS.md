@@ -5,7 +5,7 @@
 
 ## プロジェクト概要
 
-Dead Beef Saloon (`0xDEADBEEF`) は YouTube / SoundCloud / ニコニコ動画のURLをキューに入れて再生するジュークボックスWeb アプリ。
+Dead Beef Saloon (`0xDEADBEEF`) は YouTube / SoundCloud / ニコニコ動画 / Vimeo / Wistia のURLをキューに入れて再生するジュークボックスWeb アプリ。
 
 - **スタック**: Next.js 15 (App Router) + TypeScript + Tailwind + Socket.io + Prisma + PostgreSQL
 - **構成**: カスタムサーバー (`server.ts`) で Next.js と Socket.io を同居させ、`docker compose` で `app` + `db` を起動

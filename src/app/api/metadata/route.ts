@@ -10,7 +10,7 @@ export async function POST(req: Request) {
   const meta = await fetchMetadata(url);
   if (!meta) {
     return NextResponse.json(
-      { error: "対応していないURLです（YouTube / SoundCloud / ニコニコ動画のみ）" },
+      { error: "対応していないURLです（YouTube / SoundCloud / ニコニコ動画 / Vimeo / Wistia）" },
       { status: 400 },
     );
   }

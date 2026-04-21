@@ -4,11 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Dead Beef Saloon — 死んだ牛の酒場",
   description:
-    "0xDEADBEEF。YouTube / SoundCloud / ニコニコ動画のURLを投げ込んで、仲間とひと晩のBGMを持ち寄るジュークボックス酒場。",
+    "0xDEADBEEF。YouTube / SoundCloud / ニコニコ動画 / Vimeo / Wistia のURLを投げ込んで、仲間とひと晩のBGMを持ち寄るジュークボックス酒場。",
   openGraph: {
     title: "Dead Beef Saloon — 死んだ牛の酒場",
     description:
-      "0xDEADBEEF。URLを一本投げ込めば、今夜の一曲が始まる。YouTube / SoundCloud / ニコニコ対応の共有ジュークボックス。",
+      "0xDEADBEEF。URLを一本投げ込めば、今夜の一曲が始まる。YouTube / SoundCloud / ニコニコ動画 / Vimeo / Wistia 対応の共有ジュークボックス。",
     siteName: "Dead Beef Saloon",
     locale: "ja_JP",
     type: "website",

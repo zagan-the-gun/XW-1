@@ -84,6 +84,10 @@ function platformLabel(platform: Track["platform"]) {
       return "SoundCloud";
     case "NICONICO":
       return "ニコニコ動画";
+    case "VIMEO":
+      return "Vimeo";
+    case "WISTIA":
+      return "Wistia";
     default:
       return platform;
   }

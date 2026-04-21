@@ -14,6 +14,7 @@ flowchart LR
     YT[YouTube<br/>oEmbed / Player]
     SC[SoundCloud<br/>oEmbed / Player]
     NICO[ニコニコ動画<br/>getthumbinfo / embed]
+    OTHER[Vimeo / Wistia<br/>oEmbed / Player]
 
     User --> Browser
     Browser <-->|HTTP/WebSocket| App
@@ -21,9 +22,11 @@ flowchart LR
     App -->|メタデータ取得| YT
     App -->|メタデータ取得| SC
     App -->|メタデータ取得| NICO
+    App -->|メタデータ取得| OTHER
     Browser -->|iframe/Player SDK| YT
     Browser -->|iframe/Player SDK| SC
     Browser -->|iframe| NICO
+    Browser -->|iframe/Player SDK| OTHER
 ```
 
 - **ユーザー**: ルームを作成する人（ホスト）と URL で参加する人（ゲスト）の 2 ロール（現状は認証なし、`localStorage` にランダムな `guest-xxxx` を保存）
@@ -46,7 +49,7 @@ flowchart TB
     end
 
     DB[(PostgreSQL)]
-    Ext[外部 API<br/>YouTube/SoundCloud/ニコニコ]
+    Ext[外部 API<br/>YouTube / SoundCloud / ニコニコ動画 /<br/>Vimeo / Wistia]
 
     RC -->|fetch| API
     RC <-->|WebSocket| WS
@@ -80,7 +83,7 @@ erDiagram
         bool loopPlayback
     }
     Track {
-        enum platform "YOUTUBE|SOUNDCLOUD|NICONICO"
+        enum platform "YOUTUBE|SOUNDCLOUD|NICONICO|VIMEO|WISTIA"
         int position
         enum status "QUEUED|PLAYING|PLAYED|SKIPPED"
     }

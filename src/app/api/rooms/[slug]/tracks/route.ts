@@ -34,7 +34,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   const meta = await fetchMetadata(parsed.data.url);
   if (!meta) {
     return NextResponse.json(
-      { error: "対応していないURLです（YouTube / SoundCloud / ニコニコ動画のみ）" },
+      { error: "対応していないURLです（YouTube / SoundCloud / ニコニコ動画 / Vimeo / Wistia）" },
       { status: 400 },
     );
   }

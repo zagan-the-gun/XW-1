@@ -49,7 +49,7 @@ export function AddTrackForm({ roomSlug, insertAfterTrackId, onAdded }: Props) {
         <Input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="YouTube / SoundCloud / ニコニコ動画のURL"
+          placeholder="YouTube / SoundCloud / ニコニコ動画 / Vimeo / Wistia のURL"
           inputMode="url"
         />
         <Button type="submit" disabled={loading || !url.trim()} className="sm:w-auto">

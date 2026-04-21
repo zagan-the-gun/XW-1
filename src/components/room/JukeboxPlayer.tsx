@@ -40,10 +40,14 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
   }));
 
   const isNico = track?.platform === "NICONICO";
+  // Niconico has no react-player adapter, so we embed it ourselves and let
+  // the iframe handle play / pause / volume via its native controls.
+  const usesCustomPlayer = isNico;
 
   // Master volume: persisted in localStorage so it survives track changes and
   // reloads. Niconico is iframe-only (no volume postMessage API), so the
-  // slider only affects YouTube / SoundCloud via react-player's `volume` prop.
+  // slider only affects react-player-based platforms (YouTube / SoundCloud /
+  // Vimeo / Wistia) via react-player's `volume` prop.
   const [volume, setVolume] = useState(DEFAULT_VOLUME);
   const [muted, setMuted] = useState(false);
 
@@ -117,9 +121,9 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
         <Button
           size="icon"
           onClick={onTogglePlay}
-          disabled={!track || isNico}
+          disabled={!track || usesCustomPlayer}
           aria-label={playing ? "一時停止" : "再生"}
-          title={isNico ? "ニコニコ動画はプレイヤー内のコントロールで操作してください" : undefined}
+          title={usesCustomPlayer ? "このプラットフォームはプレイヤー内のコントロールで操作してください" : undefined}
         >
           {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
         </Button>
@@ -143,8 +147,8 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
         <div
           className="flex items-center gap-2 shrink-0"
           title={
-            isNico
-              ? "ニコニコ動画はプレイヤー内の音量で調整してください"
+            usesCustomPlayer
+              ? "このプラットフォームはプレイヤー内の音量で調整してください"
               : undefined
           }
         >
@@ -152,7 +156,7 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
             size="icon"
             variant="ghost"
             onClick={() => setMuted((m) => !m)}
-            disabled={isNico}
+            disabled={usesCustomPlayer}
             aria-label={muted ? "ミュート解除" : "ミュート"}
           >
             {muted || volume === 0 ? (
@@ -172,7 +176,7 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
               setVolume(next);
               if (muted && next > 0) setMuted(false);
             }}
-            disabled={isNico}
+            disabled={usesCustomPlayer}
             aria-label="音量"
             className="w-20 sm:w-28 accent-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           />
@@ -199,6 +203,10 @@ function platformLabel(platform: Track["platform"]) {
       return "SoundCloud";
     case "NICONICO":
       return "ニコニコ動画";
+    case "VIMEO":
+      return "Vimeo";
+    case "WISTIA":
+      return "Wistia";
     default:
       return platform;
   }
@@ -261,7 +269,6 @@ function NiconicoPlayer({
     const ms = (track.durationSec + 3) * 1000;
     const id = window.setTimeout(fireEnded, ms);
     return () => window.clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track.id, track.durationSec, playing]);
 
   // postMessage bridge: react to player events and issue play/pause commands.
@@ -319,3 +326,4 @@ function NiconicoPlayer({
     />
   );
 }
+

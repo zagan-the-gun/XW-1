@@ -37,8 +37,8 @@ export default async function HomePage() {
           ひとりで浸る、音楽の部屋。
         </h1>
         <p className="mt-4 text-muted-foreground max-w-2xl">
-          YouTube / SoundCloud / ニコニコ動画のURLを貼るだけ。自分専用のBGMにも、
-          飲み会のジュークボックスにも。
+          YouTube / SoundCloud / ニコニコ動画 / Vimeo / Wistia のURLを貼るだけ。
+          自分専用のBGMにも、飲み会のジュークボックスにも。
         </p>
       </header>
 

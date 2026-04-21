@@ -113,7 +113,21 @@ isNico
   : <ReactPlayer url={track.url} playing={playing} controls ... />
 ```
 
-`react-player/lazy` を `next/dynamic` で `ssr: false` 読み込み（YouTube/SoundCloud はプラットフォームSDKをブラウザで動的ロードするため）。
+`react-player/lazy` を `next/dynamic` で `ssr: false` 読み込み（YouTube / SoundCloud / Vimeo / Wistia のプラットフォームSDKをブラウザで URL に応じて動的ロードするため）。`track.url` を渡すだけで `react-player` が URL パターンから対応プラグインを選ぶので、これらのプラットフォームでは追加の分岐は不要。
+
+### ニコニコ動画が独自実装な理由
+
+`react-player` v2 はニコニコ動画に対応していないため、独自 iframe 実装で補っている。`embed.nicovideo.jp/watch/<id>?jsapi=1` を iframe で埋め込み、`postMessage` で `playerStatusChange` / `ended` を監視。保険として `durationSec + 3秒` の `setTimeout` で自動送りする。
+
+### コントロールの制約
+
+`usesCustomPlayer` が `true`（＝ ニコニコ動画再生中）のときは以下が無効化される：
+
+- 外部の再生/一時停止ボタン → プレイヤー内のコントロール（iframe 内のボタン）で操作
+- ミュート / 音量スライダー → プレイヤー内で調整
+- `sync_state` による `seekTo` も効かない
+
+これはニコニコ動画の埋め込みでは postMessage で volume/seek を送る手段が無いためで、ユーザーは iframe 内のネイティブコントロールを使う想定。
 
 ### `seekTo` の露出
 
@@ -128,7 +142,7 @@ isNico
 | `xw1.player.volume` | `0.0`〜`1.0` の文字列 |
 | `xw1.player.muted` | `"1"` または `"0"` |
 
-`ReactPlayer` には `volume` / `muted` prop を渡すため、YouTube と SoundCloud に効く。曲が切り替わっても維持されるので「次の曲が突然爆音」を防ぐのが主目的。
+`ReactPlayer` には `volume` / `muted` prop を渡すため、YouTube / SoundCloud / Vimeo / Wistia に効く。曲が切り替わっても維持されるので「次の曲が突然爆音」を防ぐのが主目的。
 
 **ニコニコ動画は例外**: 埋め込みの `postMessage` API に音量コマンドが無いため、スライダーとミュートは `disabled` にし、`title` 属性で「プレイヤー内で調整してください」と案内する。
 
@@ -184,12 +198,11 @@ export function getSocket(): Socket {
 
 外部サムネイルを `<img>` で扱う場合、Next.js の `<Image>` を使うなら `next.config.ts` の `images.remotePatterns` に追加が必要。現在の許可リスト：
 
-- `i.ytimg.com`
-- `img.youtube.com`
-- `i1.sndcdn.com`
-- `nicovideo.cdn.nimg.jp`
-- `tn.smilevideo.jp`
-
+- `i.ytimg.com` / `img.youtube.com`（YouTube）
+- `i1.sndcdn.com`（SoundCloud）
+- `nicovideo.cdn.nimg.jp` / `tn.smilevideo.jp`（ニコニコ動画）
+- `i.vimeocdn.com`（Vimeo）
+- `embed-ssl.wistia.com` / `embed-fastly.wistia.com` / `embedwistia-a.akamaihd.net`（Wistia）
 現状 `QueueList` では `<img>` (`no-img-element` の eslint-disable 付き) を使っていて Next.js Image は未使用だが、将来切り替える際はここを更新する。
 
 ## 8. ユーザー識別

@@ -2,7 +2,7 @@
 
 > *Dead Beef Saloon — where strangers buy the night a drink.*
 
-YouTube / SoundCloud / ニコニコ動画のURLをキューに追加して再生できるジュークボックスWebサービス。
+YouTube / SoundCloud / ニコニコ動画 / Vimeo / Wistia のURLをキューに追加して再生できるジュークボックスWebサービス。
 コードネームは `0xDEADBEEF`（開発者おなじみのマジックナンバー）。
 
 - ソロモード: 自分だけのBGMプレイリスト
@@ -12,7 +12,7 @@ YouTube / SoundCloud / ニコニコ動画のURLをキューに追加して再生
 
 - Next.js 15 (App Router) + TypeScript
 - Tailwind CSS
-- react-player (YouTube / SoundCloud / ニコニコ)
+- react-player (YouTube / SoundCloud / Vimeo / Wistia) + ニコニコ動画は独自 iframe 実装
 - Socket.io (リアルタイム通信)
 - Prisma + PostgreSQL
 - Docker + docker-compose

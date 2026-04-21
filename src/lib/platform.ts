@@ -67,5 +67,32 @@ export function detectPlatform(rawUrl: string): DetectedPlatform | null {
     };
   }
 
+  // Vimeo: vimeo.com/<id>, vimeo.com/channels/<x>/<id>,
+  //        vimeo.com/groups/<x>/videos/<id>, player.vimeo.com/video/<id>
+  if (host === "vimeo.com" || host === "player.vimeo.com") {
+    const segments = url.pathname.split("/").filter(Boolean);
+    const id = segments.reverse().find((s) => /^\d+$/.test(s));
+    if (!id) return null;
+    return {
+      platform: "VIMEO",
+      externalId: id,
+      normalizedUrl: `https://vimeo.com/${id}`,
+    };
+  }
+
+  // Wistia: <account>.wistia.com/medias/<hash>,
+  //         fast.wistia.com/embed/medias/<hash>.jsonp,
+  //         fast.wistia.net/embed/iframe/<hash>
+  if (host.endsWith(".wistia.com") || host === "wistia.com" || host.endsWith(".wistia.net")) {
+    const match = url.pathname.match(/\/(?:medias|embed\/medias|embed\/iframe)\/([a-z0-9]+)/i);
+    if (!match) return null;
+    const id = match[1].replace(/\.jsonp$/, "");
+    return {
+      platform: "WISTIA",
+      externalId: id,
+      normalizedUrl: `https://fast.wistia.net/embed/iframe/${id}`,
+    };
+  }
+
   return null;
 }
