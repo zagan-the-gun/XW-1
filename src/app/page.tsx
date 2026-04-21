@@ -50,7 +50,7 @@ export default async function HomePage() {
               <h2 className="text-lg font-semibold">新しいルームを作る</h2>
             </div>
             <p className="text-sm text-muted-foreground mt-1">
-              ソロモードは作業BGM向け。パーティモードはURLを共有して複数人で楽しめます。
+              作ったルームのURLを共有すれば、そのまま複数人で楽しめます。
             </p>
           </CardHeader>
           <CardBody>
@@ -95,7 +95,7 @@ export default async function HomePage() {
                     <div className="min-w-0">
                       <div className="font-medium truncate">{r.name}</div>
                       <div className="text-xs text-muted-foreground mt-1">
-                        {r.mode === "PARTY" ? "パーティ" : "ソロ"} ・ {r._count.tracks} 曲
+                        {r._count.tracks} 曲
                       </div>
                     </div>
                     <span className="shrink-0 text-xs text-muted-foreground font-mono">

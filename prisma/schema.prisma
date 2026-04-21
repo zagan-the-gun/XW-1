@@ -15,16 +15,6 @@ enum Platform {
   WISTIA
 }
 
-enum RoomMode {
-  SOLO
-  PARTY
-}
-
-enum PlaybackMode {
-  HOST
-  SYNC
-}
-
 enum TrackStatus {
   QUEUED
   PLAYING
@@ -48,8 +38,6 @@ model Room {
   name         String
   slug         String       @unique
   hostId       String?
-  mode         RoomMode     @default(SOLO)
-  playbackMode PlaybackMode @default(HOST)
   isPublic     Boolean      @default(false)
   loopPlayback Boolean      @default(false)
   createdAt    DateTime     @default(now())

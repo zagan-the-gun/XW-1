@@ -63,14 +63,33 @@ export function registerSocketHandlers(io: SocketIOServer) {
       socket.to(roomSlug).emit("skip", {});
     });
 
-    socket.on("sync_state", ({ roomSlug, trackId, positionSec }: PlaybackPayload) => {
-      socket.to(roomSlug).emit("sync_state", { trackId, positionSec: positionSec ?? 0 });
-    });
-
     socket.on(
       "settings_changed",
       ({ roomSlug, loopPlayback }: { roomSlug: string; loopPlayback?: boolean }) => {
         socket.to(roomSlug).emit("settings_changed", { loopPlayback });
+      },
+    );
+
+    // A new listener asks the room "what's playing and where?". Every
+    // currently-listening peer that receives the query may reply; the
+    // requester adopts whichever reply arrives first (race-based, good
+    // enough for the "rough position" UX we target).
+    socket.on("state_query", ({ roomSlug }: { roomSlug: string }) => {
+      socket.to(roomSlug).emit("state_query", { requesterSocketId: socket.id });
+    });
+
+    socket.on(
+      "state_reply",
+      ({
+        requesterSocketId,
+        trackId,
+        positionSec,
+      }: {
+        requesterSocketId: string;
+        trackId: string;
+        positionSec: number;
+      }) => {
+        io.to(requesterSocketId).emit("state_reply", { trackId, positionSec });
       },
     );
 

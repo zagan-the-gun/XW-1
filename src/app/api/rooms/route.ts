@@ -5,8 +5,6 @@ import { generateRoomSlug } from "@/lib/slug";
 
 const CreateRoomSchema = z.object({
   name: z.string().min(1).max(80),
-  mode: z.enum(["SOLO", "PARTY"]).default("SOLO"),
-  playbackMode: z.enum(["HOST", "SYNC"]).default("HOST"),
   isPublic: z.boolean().default(false),
 });
 
@@ -37,8 +35,6 @@ export async function POST(req: Request) {
     data: {
       name: parsed.data.name,
       slug,
-      mode: parsed.data.mode,
-      playbackMode: parsed.data.playbackMode,
       isPublic: parsed.data.isPublic,
     },
   });

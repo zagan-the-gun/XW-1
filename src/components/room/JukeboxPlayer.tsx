@@ -14,12 +14,17 @@ const DEFAULT_VOLUME = 0.8;
 
 export type JukeboxPlayerHandle = {
   seekTo: (seconds: number) => void;
+  getCurrentTime: () => number;
 };
 
 type Props = {
   track?: Track;
   playing: boolean;
   hasNext: boolean;
+  // When false this device is "remote control only": no iframe is mounted,
+  // no audio plays, but the track title/controls are still shown so the user
+  // can add/skip/etc. on behalf of the room.
+  listening: boolean;
   onEnded: () => void;
   onTogglePlay: () => void;
   onSkip: () => void;
@@ -27,15 +32,21 @@ type Props = {
 };
 
 export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function JukeboxPlayer(
-  { track, playing, hasNext, onEnded, onTogglePlay, onSkip, onProgress },
+  { track, playing, hasNext, listening, onEnded, onTogglePlay, onSkip, onProgress },
   ref,
 ) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const playerRef = useRef<any>(null);
+  const lastKnownPositionRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
     seekTo(seconds: number) {
       playerRef.current?.seekTo?.(seconds, "seconds");
+    },
+    getCurrentTime() {
+      const current = playerRef.current?.getCurrentTime?.();
+      if (typeof current === "number" && Number.isFinite(current)) return current;
+      return lastKnownPositionRef.current;
     },
   }));
 
@@ -87,43 +98,54 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
   const effectiveVolume = muted ? 0 : volume;
   const sliderValue = Math.round(effectiveVolume * 100);
 
+  const handleProgress = (state: { playedSeconds: number }) => {
+    lastKnownPositionRef.current = state.playedSeconds;
+    onProgress?.(state);
+  };
+
   return (
     <div>
-      <div className="aspect-video w-full bg-black relative">
-        {track ? (
-          isNico ? (
-            <NiconicoPlayer track={track} playing={playing} onEnded={onEnded} />
+      {listening && (
+        <div className="aspect-video w-full bg-black relative">
+          {track ? (
+            isNico ? (
+              <NiconicoPlayer track={track} playing={playing} onEnded={onEnded} />
+            ) : (
+              <ReactPlayer
+                ref={playerRef}
+                url={track.url}
+                playing={playing}
+                controls
+                width="100%"
+                height="100%"
+                volume={effectiveVolume}
+                muted={muted}
+                onEnded={onEnded}
+                onProgress={handleProgress}
+                progressInterval={1000}
+                config={{
+                  youtube: {
+                    playerVars: { playsinline: 1 },
+                  },
+                }}
+              />
+            )
           ) : (
-            <ReactPlayer
-              ref={playerRef}
-              url={track.url}
-              playing={playing}
-              controls
-              width="100%"
-              height="100%"
-              volume={effectiveVolume}
-              muted={muted}
-              onEnded={onEnded}
-              onProgress={onProgress}
-              progressInterval={1000}
-              config={{
-                youtube: {
-                  playerVars: { playsinline: 1 },
-                },
-              }}
-            />
-          )
-        ) : (
-          <EmptyPlayer />
-        )}
-      </div>
+            <EmptyPlayer />
+          )}
+        </div>
+      )}
       <div className="flex items-center gap-3 p-4 border-t border-border bg-black/30">
         <Button
           size="icon"
           onClick={onTogglePlay}
-          disabled={!track || usesCustomPlayer}
+          disabled={!track || (listening && usesCustomPlayer)}
           aria-label={playing ? "一時停止" : "再生"}
-          title={usesCustomPlayer ? "このプラットフォームはプレイヤー内のコントロールで操作してください" : undefined}
+          title={
+            listening && usesCustomPlayer
+              ? "このプラットフォームはプレイヤー内のコントロールで操作してください"
+              : undefined
+          }
         >
           {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
         </Button>
@@ -144,43 +166,45 @@ export const JukeboxPlayer = forwardRef<JukeboxPlayerHandle, Props>(function Juk
             {track ? platformLabel(track.platform) : "URLを貼ってキューに追加しましょう"}
           </div>
         </div>
-        <div
-          className="flex items-center gap-2 shrink-0"
-          title={
-            usesCustomPlayer
-              ? "このプラットフォームはプレイヤー内の音量で調整してください"
-              : undefined
-          }
-        >
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => setMuted((m) => !m)}
-            disabled={usesCustomPlayer}
-            aria-label={muted ? "ミュート解除" : "ミュート"}
+        {listening && (
+          <div
+            className="flex items-center gap-2 shrink-0"
+            title={
+              usesCustomPlayer
+                ? "このプラットフォームはプレイヤー内の音量で調整してください"
+                : undefined
+            }
           >
-            {muted || volume === 0 ? (
-              <VolumeX className="h-5 w-5" />
-            ) : (
-              <Volume2 className="h-5 w-5" />
-            )}
-          </Button>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={sliderValue}
-            onChange={(e) => {
-              const next = Number.parseInt(e.target.value, 10) / 100;
-              setVolume(next);
-              if (muted && next > 0) setMuted(false);
-            }}
-            disabled={usesCustomPlayer}
-            aria-label="音量"
-            className="w-20 sm:w-28 accent-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          />
-        </div>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setMuted((m) => !m)}
+              disabled={usesCustomPlayer}
+              aria-label={muted ? "ミュート解除" : "ミュート"}
+            >
+              {muted || volume === 0 ? (
+                <VolumeX className="h-5 w-5" />
+              ) : (
+                <Volume2 className="h-5 w-5" />
+              )}
+            </Button>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={sliderValue}
+              onChange={(e) => {
+                const next = Number.parseInt(e.target.value, 10) / 100;
+                setVolume(next);
+                if (muted && next > 0) setMuted(false);
+              }}
+              disabled={usesCustomPlayer}
+              aria-label="音量"
+              className="w-20 sm:w-28 accent-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            />
+          </div>
+        )}
       </div>
     </div>
   );

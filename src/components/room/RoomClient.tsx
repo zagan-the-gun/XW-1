@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room, Track } from "@prisma/client";
-import { Repeat, Share2, Users, Wifi, WifiOff } from "lucide-react";
+import { Headphones, HeadphoneOff, Repeat, Share2, Users, Wifi, WifiOff } from "lucide-react";
 import { getSocket } from "@/lib/socket";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { JukeboxPlayer } from "./JukeboxPlayer";
+import { JukeboxPlayer, type JukeboxPlayerHandle } from "./JukeboxPlayer";
 import { QueueList } from "./QueueList";
 import { AddTrackForm } from "./AddTrackForm";
 import { ParticipantList, type Participant } from "./ParticipantList";
 
 type RoomWithTracks = Room & { tracks: Track[] };
+
+const LISTENING_KEY = (slug: string) => `jukebox:listening:${slug}`;
 
 export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
   const [room, setRoom] = useState(initialRoom);
@@ -22,6 +24,11 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [connected, setConnected] = useState(false);
+  // Per-user / per-device listening toggle. ON = this browser mounts the
+  // iframe and actually plays audio. OFF = remote-control only (no audio,
+  // no video, but the user can still see the queue and press play/skip/etc.
+  // to drive what the other listeners hear).
+  const [listening, setListening] = useState(false);
   const [userName] = useState(() => {
     if (typeof window === "undefined") return "guest";
     const key = "jukebox:userName";
@@ -32,16 +39,24 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     return name;
   });
 
-  const isParty = room.mode === "PARTY";
+  // Load the listening preference on mount (client-only).
+  useEffect(() => {
+    try {
+      setListening(window.localStorage.getItem(LISTENING_KEY(room.slug)) === "1");
+    } catch {
+      // localStorage unavailable; fall back to OFF (default).
+    }
+  }, [room.slug]);
+
   const loopPlayback = room.loopPlayback;
   const currentTrack = currentIndex >= 0 ? tracks[currentIndex] : undefined;
-  const playerRef = useRef<{ seekTo: (seconds: number) => void } | null>(null);
+  const playerRef = useRef<JukeboxPlayerHandle | null>(null);
 
   // Keep the latest snapshot accessible from callbacks without retriggering effects.
-  const latestRef = useRef({ tracks, currentIndex, loopPlayback, isPlaying });
+  const latestRef = useRef({ tracks, currentIndex, loopPlayback, isPlaying, listening });
   useEffect(() => {
-    latestRef.current = { tracks, currentIndex, loopPlayback, isPlaying };
-  }, [tracks, currentIndex, loopPlayback, isPlaying]);
+    latestRef.current = { tracks, currentIndex, loopPlayback, isPlaying, listening };
+  }, [tracks, currentIndex, loopPlayback, isPlaying, listening]);
 
   const refreshTracks = useCallback(async () => {
     const res = await fetch(`/api/rooms/${room.slug}/tracks`);
@@ -59,8 +74,15 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     });
   }, [room.slug]);
 
+  // Pending state-query flag: set when we OFF->ON toggle and emit state_query,
+  // cleared on first reply or on the 1s fallback timeout.
+  const pendingStateQueryRef = useRef(false);
+
+  // handleEndedRef lets socket listeners call the latest handleEnded without
+  // re-subscribing on every render.
+  const handleEndedRef = useRef<() => void>(() => {});
+
   useEffect(() => {
-    if (!isParty) return;
     const socket = getSocket();
 
     const onConnect = () => setConnected(true);
@@ -83,15 +105,38 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     };
     const onPause = () => setIsPlaying(false);
     const onSkip = () => handleEndedRef.current?.();
-    const onSyncState = ({ positionSec }: { trackId?: string; positionSec?: number }) => {
-      if (room.playbackMode === "SYNC" && typeof positionSec === "number" && playerRef.current) {
-        playerRef.current.seekTo(positionSec);
-      }
-    };
     const onSettingsChanged = ({ loopPlayback }: { loopPlayback?: boolean }) => {
       if (typeof loopPlayback === "boolean") {
         setRoom((prev) => ({ ...prev, loopPlayback }));
       }
+    };
+
+    // Another peer just flipped their listening toggle ON and wants to know
+    // what's playing. Only respond if we're actively listening with a track
+    // so the requester gets a real, current position.
+    const onStateQuery = ({ requesterSocketId }: { requesterSocketId: string }) => {
+      const snap = latestRef.current;
+      if (!snap.listening || !snap.isPlaying || snap.currentIndex < 0) return;
+      const track = snap.tracks[snap.currentIndex];
+      if (!track) return;
+      const positionSec = playerRef.current?.getCurrentTime?.() ?? 0;
+      socket.emit("state_reply", { requesterSocketId, trackId: track.id, positionSec });
+    };
+
+    // Race-based: the first reply wins and is used to seek. All subsequent
+    // replies are dropped because pendingStateQueryRef has been cleared.
+    const onStateReply = ({ trackId, positionSec }: { trackId: string; positionSec: number }) => {
+      if (!pendingStateQueryRef.current) return;
+      pendingStateQueryRef.current = false;
+      const snap = latestRef.current;
+      const idx = snap.tracks.findIndex((t) => t.id === trackId);
+      if (idx < 0) return;
+      setCurrentIndex(idx);
+      setIsPlaying(true);
+      // Player iframe may still be mounting; delay the seek so it takes effect.
+      setTimeout(() => {
+        playerRef.current?.seekTo(positionSec);
+      }, 500);
     };
 
     socket.on("participants", onParticipants);
@@ -100,8 +145,9 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     socket.on("play", onPlay);
     socket.on("pause", onPause);
     socket.on("skip", onSkip);
-    socket.on("sync_state", onSyncState);
     socket.on("settings_changed", onSettingsChanged);
+    socket.on("state_query", onStateQuery);
+    socket.on("state_reply", onStateReply);
 
     return () => {
       socket.emit("leave_room", { roomSlug: room.slug });
@@ -113,17 +159,17 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
       socket.off("play", onPlay);
       socket.off("pause", onPause);
       socket.off("skip", onSkip);
-      socket.off("sync_state", onSyncState);
       socket.off("settings_changed", onSettingsChanged);
+      socket.off("state_query", onStateQuery);
+      socket.off("state_reply", onStateReply);
     };
-  }, [isParty, room.slug, room.playbackMode, userName, refreshTracks]);
+  }, [room.slug, userName, refreshTracks]);
 
   const emit = useCallback(
     (event: string, payload: Record<string, unknown> = {}) => {
-      if (!isParty) return;
       getSocket().emit(event, { roomSlug: room.slug, ...payload });
     },
-    [isParty, room.slug],
+    [room.slug],
   );
 
   // Adding a track inserts it right after the current track (and any
@@ -133,10 +179,7 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
   const handleAdded = useCallback(
     (track: Track) => {
       setTracks((prev) => {
-        // Re-fetch is the safest way to sync positions after an insert, but we
-        // optimistically append/insert so the UI doesn't flash empty.
         if (loopPlayback && currentIndex >= 0) {
-          // Insert visually after the current "priority run".
           const anchor = prev[currentIndex];
           let insertAt = currentIndex + 1;
           for (let i = currentIndex + 1; i < prev.length; i++) {
@@ -153,20 +196,17 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
 
       setCurrentIndex((prev) => {
         if (prev >= 0) return prev;
-        // Empty queue -> start playing the freshly added track.
         return latestRef.current.tracks.findIndex((t) => t.status === "QUEUED") >= 0
           ? latestRef.current.tracks.findIndex((t) => t.status === "QUEUED")
           : 0;
       });
 
-      // Party: broadcast the add, and kick off auto-play when the queue was empty.
       emit("track_added", { trackId: track.id });
       if (latestRef.current.currentIndex < 0) {
         setIsPlaying(true);
         emit("play", { trackId: track.id, positionSec: 0 });
       }
 
-      // Pull the authoritative track list so everyone shares identical positions.
       refreshTracks();
     },
     [loopPlayback, currentIndex, emit, refreshTracks],
@@ -201,10 +241,6 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     });
   }, [emit, currentTrack?.id]);
 
-  // handleEndedRef lets socket listeners call the latest handleEnded without
-  // re-subscribing on every render.
-  const handleEndedRef = useRef<() => void>(() => {});
-
   const handleEnded = useCallback(() => {
     const snap = latestRef.current;
     if (snap.currentIndex < 0) return;
@@ -223,14 +259,18 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
 
     const nextIdx = findNextQueued(updatedTracks, snap.currentIndex);
     if (nextIdx >= 0) {
+      const nextTrack = updatedTracks[nextIdx];
       setCurrentIndex(nextIdx);
       setIsPlaying(true);
+      // Broadcast the natural advance so every peer (including non-listening
+      // remote controllers) jumps to this track's head. Lag peers lose the
+      // final seconds of the finished track — deliberate trade-off per spec.
+      emit("play", { trackId: nextTrack.id, positionSec: 0 });
       return;
     }
 
     // No more queued tracks ahead.
     if (snap.loopPlayback) {
-      // Cycle end -> reset everyone to QUEUED and restart from the top.
       fetch(`/api/rooms/${room.slug}/tracks/reset`, { method: "POST" })
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
@@ -275,14 +315,11 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
         body: JSON.stringify({ loopPlayback: next }),
       });
     } catch {
-      // Revert on failure.
       setRoom((prev) => ({ ...prev, loopPlayback: !next }));
       emit("settings_changed", { loopPlayback: !next });
       return;
     }
 
-    // When turning loop ON while playback is stopped with only PLAYED tracks,
-    // restart the cycle immediately so the user gets the expected behavior.
     const snap = latestRef.current;
     if (next && snap.currentIndex < 0 && snap.tracks.length > 0) {
       const res = await fetch(`/api/rooms/${room.slug}/tracks/reset`, {
@@ -299,6 +336,45 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     }
   }, [loopPlayback, room.slug, emit]);
 
+  const handleToggleListening = useCallback(() => {
+    setListening((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(LISTENING_KEY(room.slug), next ? "1" : "0");
+      } catch {
+        // ignore (private mode etc.)
+      }
+
+      if (next) {
+        // OFF -> ON: ask peers where the playback is. The first reply wins.
+        // If no peer answers within 1s, fall back to "start the first QUEUED
+        // track from 0" so a solo user isn't stuck.
+        pendingStateQueryRef.current = true;
+        getSocket().emit("state_query", { roomSlug: room.slug });
+        setTimeout(() => {
+          if (!pendingStateQueryRef.current) return;
+          pendingStateQueryRef.current = false;
+          const snap = latestRef.current;
+          if (snap.currentIndex < 0) {
+            const firstQueued = snap.tracks.findIndex((t) => t.status === "QUEUED");
+            if (firstQueued >= 0) {
+              setCurrentIndex(firstQueued);
+              setIsPlaying(true);
+            }
+          } else if (!snap.isPlaying) {
+            setIsPlaying(true);
+          }
+        }, 1000);
+      } else {
+        // ON -> OFF: stop local audio without affecting other listeners.
+        // The iframe will unmount via the `listening` prop, so we only need
+        // to flip isPlaying locally (without broadcasting pause).
+        setIsPlaying(false);
+      }
+      return next;
+    });
+  }, [room.slug]);
+
   const handleShare = useCallback(async () => {
     const url = `${window.location.origin}/room/${room.slug}`;
     try {
@@ -313,25 +389,9 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     }
   }, [room.slug, room.name]);
 
-  const positionReportRef = useRef(0);
-  const handleProgress = useCallback(
-    (state: { playedSeconds: number }) => {
-      if (room.playbackMode !== "SYNC") return;
-      if (!currentTrack) return;
-      const now = Date.now();
-      if (now - positionReportRef.current < 5000) return;
-      positionReportRef.current = now;
-      emit("sync_state", { trackId: currentTrack.id, positionSec: state.playedSeconds });
-    },
-    [room.playbackMode, currentTrack, emit],
-  );
-
   const headerSubtitle = useMemo(
-    () =>
-      `${room.mode === "PARTY" ? "パーティ" : "ソロ"}モード・${
-        room.playbackMode === "SYNC" ? "同期再生" : "ホスト再生"
-      }`,
-    [room.mode, room.playbackMode],
+    () => (listening ? "この端末で再生中" : "リモコンモード（音は鳴りません）"),
+    [listening],
   );
 
   return (
@@ -346,17 +406,34 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {isParty && (
-                <span
-                  className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md ${
-                    connected ? "bg-green-500/15 text-green-300" : "bg-red-500/15 text-red-300"
-                  }`}
-                  title={connected ? "接続中" : "未接続"}
-                >
-                  {connected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-                  {connected ? "接続中" : "再接続中"}
-                </span>
-              )}
+              <span
+                className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md ${
+                  connected ? "bg-green-500/15 text-green-300" : "bg-red-500/15 text-red-300"
+                }`}
+                title={connected ? "接続中" : "未接続"}
+              >
+                {connected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                {connected ? "接続中" : "再接続中"}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleToggleListening}
+                aria-pressed={listening}
+                title={
+                  listening
+                    ? "同期オン（この端末でも曲を流す）"
+                    : "同期オフ（他の参加者の端末でのみ再生）"
+                }
+                className={listening ? "!border-primary/70 !text-primary !bg-primary/10" : ""}
+              >
+                {listening ? (
+                  <Headphones className="h-4 w-4" />
+                ) : (
+                  <HeadphoneOff className="h-4 w-4" />
+                )}
+                同期
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -385,10 +462,10 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
             ref={playerRef}
             track={currentTrack}
             playing={isPlaying}
+            listening={listening}
             onEnded={handleEnded}
             onTogglePlay={handleTogglePlay}
             onSkip={handleSkip}
-            onProgress={handleProgress}
             hasNext={findNextQueued(tracks, currentIndex) >= 0 || (loopPlayback && tracks.length > 0)}
           />
         </Card>
@@ -406,15 +483,13 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
       </div>
 
       <aside className="space-y-4">
-        {isParty && (
-          <Card className="p-4 sm:p-5">
-            <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              参加者 ({participants.length})
-            </h2>
-            <ParticipantList participants={participants} me={userName} />
-          </Card>
-        )}
+        <Card className="p-4 sm:p-5">
+          <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            <Users className="h-4 w-4" />
+            参加者 ({participants.length})
+          </h2>
+          <ParticipantList participants={participants} me={userName} />
+        </Card>
 
         <Card className="p-4 sm:p-5">
           <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">

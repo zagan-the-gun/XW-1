@@ -28,14 +28,14 @@ src/components/
 │   ├── Card.tsx
 │   └── Input.tsx
 ├── home/                          ホームページ専用
-│   ├── CreateRoomForm.tsx         ルーム作成（mode / playbackMode 選択）
+│   ├── CreateRoomForm.tsx         ルーム作成（ルーム名のみ）
 │   └── JoinRoomForm.tsx           コード/URL → /room/[slug] へ遷移
 └── room/                          ルームページ専用
     ├── RoomClient.tsx             ⭐ ルーム画面の中核
-    ├── JukeboxPlayer.tsx          プレイヤー（react-player + niconico独自）
+    ├── JukeboxPlayer.tsx          プレイヤー（react-player + niconico独自、listening=false で iframe 非描画）
     ├── QueueList.tsx              キュー表示・選択・削除
     ├── AddTrackForm.tsx           URL 入力フォーム
-    └── ParticipantList.tsx        参加者表示（PARTY時のみ）
+    └── ParticipantList.tsx        参加者表示
 ```
 
 ## 3. `RoomClient` の状態管理
@@ -49,16 +49,26 @@ src/components/
 | `room` | `Room` | ルーム設定（`loopPlayback` 等の更新がここに集約） |
 | `tracks` | `Track[]` | キュー。position 昇順で保持 |
 | `currentIndex` | `number` | 現在再生中のインデックス（`-1` はアイドル状態） |
-| `isPlaying` | `boolean` | 再生中フラグ |
-| `participants` | `Participant[]` | PARTY時の参加者一覧 |
+| `isPlaying` | `boolean` | 再生中フラグ。listening=false の端末では iframe が無いので "ルームの状態を反映するだけ" |
+| `participants` | `Participant[]` | 参加者一覧（Socket は常時接続） |
 | `connected` | `boolean` | Socket接続状態 |
+| `listening` | `boolean` | **per-user / per-device の同期トグル**。`localStorage:jukebox:listening:<slug>` で永続化、デフォルト OFF |
 | `userName` | `string` | `localStorage` に保存される `guest-xxxx` |
+
+### `listening` の意味
+
+`listening` は「この端末で実際に映像／音声を再生するかどうか」を表す **端末ローカル設定**で、DB にも Socket にも載らない。
+
+- `listening=true` ＝ "スピーカー": iframe を mount して鳴らす
+- `listening=false` ＝ "リモコン": iframe は mount しない、ヘッダーやコントロールバーは表示され、再生・スキップ・キュー操作は他の listener にブロードキャストされる
+
+各操作者がそれぞれ `localStorage` で独立に切り替えるので、A の同期トグルは B の状態に影響しない。
 
 ### 最新 state を effect から参照する `latestRef`
 
-再レンダリングのたびに Socket リスナーを再登録するのを避けるため、`latestRef.current = { tracks, currentIndex, loopPlayback, isPlaying }` を毎レンダで更新。Socket ハンドラ内では `latestRef.current` を見ることで最新値を参照する。
+再レンダリングのたびに Socket リスナーを再登録するのを避けるため、`latestRef.current = { tracks, currentIndex, loopPlayback, isPlaying, listening }` を毎レンダで更新。Socket ハンドラ内では `latestRef.current` を見ることで最新値を参照する。
 
-同様に `handleEndedRef` で最新の `handleEnded` を保持している（循環依存を避けつつ常に新しい関数を呼ぶため）。
+同様に `handleEndedRef` で最新の `handleEnded` を保持している（循環依存を避けつつ常に新しい関数を呼ぶため）。`pendingStateQueryRef` は「同期 OFF→ON 直後の `state_reply` 待ち中か」を保持し、最初の reply を採用したら即クリアする。
 
 ### イベントと状態遷移
 
@@ -70,26 +80,38 @@ flowchart LR
 
     ended[onEnded] --> patchPlayed[PATCH status=PLAYED]
     patchPlayed --> next{次のQUEUEDあり?}
-    next -->|yes| playNext[setCurrentIndex]
+    next -->|yes| playNext[setCurrentIndex+emit play]
     next -->|no & loop| resetAll[POST /tracks/reset]
     next -->|no & !loop| idle[currentIndex=-1]
     resetAll --> playFirst
 
     toggleLoop[ループON/OFF] --> patchRoom[PATCH /rooms]
     patchRoom --> emitSettings[emit settings_changed]
+
+    toggleListen[同期トグル] -->|OFF→ON| qry[emit state_query]
+    qry -->|reply 受信| seek[setCurrentIndex+seekTo]
+    qry -->|1秒待っても無音| fallback[先頭QUEUEDを0秒から]
+    toggleListen -->|ON→OFF| stopLocal[setIsPlaying=false<br/>broadcast しない]
 ```
 
-### Socket リスナーの責務（PARTY モード時のみ）
+### Socket リスナーの責務
+
+Socket は全ルームで常時接続。
 
 - `participants` → state 更新
 - `track_added` / `queue_changed` → `refreshTracks()` で DB から refetch
-- `play` → `currentIndex` と `isPlaying` を更新
+- `play` → `currentIndex` と `isPlaying` を更新（listening=false でも UI を反映するため受け取る）
 - `pause` → `isPlaying=false`
-- `skip` → `handleEnded()` を呼び出し（ホスト以外でも進ませる）
-- `sync_state` → `playbackMode === "SYNC"` のときだけ `playerRef.current.seekTo(positionSec)` で同期
+- `skip` → `handleEnded()` を呼び出し（誰が押しても全員進む）
 - `settings_changed` → `room.loopPlayback` を更新
+- `state_query` → 自分が `listening=true` && `isPlaying=true` で曲があるとき、`playerRef.current.getCurrentTime()` を `state_reply` で返す
+- `state_reply` → `pendingStateQueryRef.current` が立っているときだけ採用、`setCurrentIndex` + 500ms 後に `seekTo`（iframe mount 待ち）。**最初の 1 件で `pendingStateQueryRef` をクリア**して以降は無視（race-based）
 
-**ソロ（SOLO）モードでは Socket に接続しない**。`useEffect` の `if (!isParty) return;` で early return。
+### handleEnded で `play` を emit する理由
+
+各端末は独立に再生していくため、CM やバッファリングで進度がズレる。これを毎曲の頭でリセットするため、`handleEnded` は次曲の `play { trackId, positionSec: 0 }` を emit する。
+
+副作用：CM 等で遅れている端末はその曲のラスト数秒〜数十秒を聴き逃す。これは仕様として許容（位置同期で飛び飛びになるよりマシ）。
 
 ### 楽観的更新 + 再取得
 
@@ -105,7 +127,16 @@ flowchart LR
 
 `src/components/room/JukeboxPlayer.tsx`。`react-player` をラップし、ニコニコ動画だけ独自実装。
 
-### プラットフォーム分岐
+### `listening` prop による条件描画
+
+`listening=false` のとき：
+
+- 動画 iframe（ReactPlayer / NiconicoPlayer）は **mount しない**（ロードもしない、音も出ない）
+- 音量・ミュートのコントロールも非表示（音が出ない端末で出しても意味ないため）
+- 再生 / 一時停止 / スキップボタン・曲名・サムネは従来通り表示（リモコンとして使うため）
+- 再生ボタンは `usesCustomPlayer`（NicoNico）でも有効（iframe が無いので "プレイヤー内で操作" 制約も無効化）
+
+### プラットフォーム分岐（listening=true の場合）
 
 ```tsx
 isNico
@@ -121,17 +152,22 @@ isNico
 
 ### コントロールの制約
 
-`usesCustomPlayer` が `true`（＝ ニコニコ動画再生中）のときは以下が無効化される：
+`listening=true` でかつ `usesCustomPlayer` が `true`（＝ ニコニコ動画再生中）のときは以下が無効化される：
 
 - 外部の再生/一時停止ボタン → プレイヤー内のコントロール（iframe 内のボタン）で操作
 - ミュート / 音量スライダー → プレイヤー内で調整
-- `sync_state` による `seekTo` も効かない
+- `seekTo` 経由の位置合わせも効かない（`state_reply` を受けて `seekTo` してもニコニコ動画には届かない）
 
 これはニコニコ動画の埋め込みでは postMessage で volume/seek を送る手段が無いためで、ユーザーは iframe 内のネイティブコントロールを使う想定。
 
-### `seekTo` の露出
+### `JukeboxPlayerHandle` の露出
 
-`forwardRef + useImperativeHandle` で親に `seekTo(seconds)` メソッドを公開。`RoomClient` が `sync_state` イベントを受けたときに呼ぶ。
+`forwardRef + useImperativeHandle` で親に以下を公開：
+
+| メソッド | 用途 |
+|---|---|
+| `seekTo(seconds)` | `state_reply` 受信時に位置を合わせる |
+| `getCurrentTime()` | 他の peer から `state_query` が来たときに、現在位置を返すため。内部で react-player の `getCurrentTime()` を呼び、取得できなかった場合は `onProgress` で蓄積した `lastKnownPositionRef` を返す |
 
 ### マスター音量
 

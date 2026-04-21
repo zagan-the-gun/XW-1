@@ -4,7 +4,6 @@ import { prisma } from "@/lib/prisma";
 
 const PatchRoomSchema = z.object({
   loopPlayback: z.boolean().optional(),
-  playbackMode: z.enum(["HOST", "SYNC"]).optional(),
   name: z.string().min(1).max(80).optional(),
 });
 
