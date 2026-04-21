@@ -17,10 +17,11 @@ YouTube / SoundCloud / ニコニコ動画のURLをキューに追加して再生
 - Prisma + PostgreSQL
 - Docker + docker-compose
 
-## 起動方法
+## クイックスタート
 
 ### 前提
 - Docker Desktop
+- Windows 11 + WSL2 で動かす場合は [docs/infrastructure.md §5](./docs/infrastructure.md#5-windows-11--wsl2-環境での注意点) も先に読む
 
 ### 初回起動
 
@@ -35,41 +36,40 @@ docker compose up --build
 docker compose exec app npx prisma migrate dev --name init
 ```
 
-ブラウザで http://localhost:3000 を開く。
+ブラウザで http://localhost:3000 を開く（Windows 11 の場合は `http://127.0.0.1:3000` を推奨、理由は [infrastructure.md §5.4](./docs/infrastructure.md#54-ブラウザからは-127001-を使う)）。
 
 ### 2回目以降
 
 ```bash
-docker compose up
+docker compose up          # 起動
+docker compose down        # 停止
+docker compose down -v     # DBごと消す
 ```
 
-### 停止
+詳細は [docs/infrastructure.md](./docs/infrastructure.md) を参照。
 
-```bash
-docker compose down
-```
+## ドキュメント
 
-DBごと消す場合:
+設計やインフラの詳細は `docs/` にまとめている：
 
-```bash
-docker compose down -v
-```
+| ドキュメント | 内容 |
+|---|---|
+| [docs/architecture.md](./docs/architecture.md) | システム全体像・主要ユースケース・データモデル |
+| [docs/backend.md](./docs/backend.md) | REST API / Prisma スキーマ / Socket.io ハンドラ |
+| [docs/frontend.md](./docs/frontend.md) | App Router 構成・コンポーネント・状態管理・プラットフォーム固有の注意 |
+| [docs/infrastructure.md](./docs/infrastructure.md) | Docker 構成・WSL2 + V6プラス のハマりどころ・デプロイ方針 |
 
-### DBにホストから繋ぎたい場合（Prisma Studio等）
+AI エージェント向けの指針は [AGENTS.md](./AGENTS.md) にある。
 
-デフォルトではDBコンテナのポートを外部に公開していません。ホストから繋ぎたい場合は
-`docker-compose.yml` の `db` サービスに以下を追加してください:
+## ディレクトリ構成
 
-```yaml
-    ports:
-      - "5433:5432"
-```
-
-その上で `.env` に以下を追加:
-
-```
-DATABASE_URL=postgresql://jukebox:jukebox@localhost:5433/jukebox?schema=public
-```
+- `server.ts` — Next.js カスタムサーバー（Socket.io 統合）
+- `src/app/` — App Router のページ・API Routes
+- `src/components/` — React コンポーネント（`home/`, `room/`, `ui/`）
+- `src/lib/` — 共通ロジック（URL判定、メタデータ取得、Prisma 等）
+- `src/server/` — サーバー側ロジック（Socket.io ハンドラ）
+- `prisma/schema.prisma` — DB スキーマ
+- `docs/` — 設計ドキュメント
 
 ## ローカル開発（Dockerを使わない場合）
 
@@ -81,18 +81,9 @@ npx prisma migrate dev --name init
 npm run dev
 ```
 
-## ディレクトリ構成
-
-- `server.ts` — Next.js カスタムサーバー（Socket.io 統合）
-- `src/app/` — App Router のページ・API Routes
-- `src/components/` — React コンポーネント
-- `src/lib/` — 共通ロジック（URL判定、メタデータ取得など）
-- `src/server/` — サーバー側ロジック（Socket.io ハンドラ）
-- `prisma/schema.prisma` — DB スキーマ
-
 ## 開発フェーズ
 
-- Phase 1: 基盤（ソロモード、URL追加、順次再生）
-- Phase 2: パーティモード（Socket.io、キュー同期）
-- Phase 3: 同期再生（ホスト→ゲストの再生位置同期）
-- Phase 4: 認証・投票・チャット・Capacitor によるアプリ化
+- Phase 1: 基盤（ソロモード、URL追加、順次再生） — 実装済
+- Phase 2: パーティモード（Socket.io、キュー同期） — 実装済
+- Phase 3: 同期再生（ホスト→ゲストの再生位置同期） — 実装済
+- Phase 4: 認証・投票・チャット・Capacitor によるアプリ化 — 未着手
