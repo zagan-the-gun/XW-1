@@ -143,6 +143,10 @@ function NiconicoPlayer({
   const onEndedRef = useRef(onEnded);
   const endedFiredRef = useRef(false);
   const playingRef = useRef(playing);
+  // Ensures we issue at most one play() postMessage per mounted track.
+  // Without this we'd fire play on every `playerMetadataChange`, which
+  // niconico emits repeatedly during playback, resetting position to 0.
+  const playSentRef = useRef(false);
 
   useEffect(() => {
     onEndedRef.current = onEnded;
@@ -154,6 +158,7 @@ function NiconicoPlayer({
 
   useEffect(() => {
     endedFiredRef.current = false;
+    playSentRef.current = false;
   }, [track.id]);
 
   const fireEnded = () => {
@@ -177,13 +182,6 @@ function NiconicoPlayer({
   // postMessage bridge: react to player events and issue play/pause commands.
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
-      // Debug: log anything that comes from our niconico iframe, regardless
-      // of whether we recognize the event shape. Helps diagnose whether the
-      // jsapi handshake succeeded at all.
-      if (ev.source === iframeRef.current?.contentWindow) {
-        // eslint-disable-next-line no-console
-        console.log("[nico→us]", { origin: ev.origin, data: ev.data });
-      }
       if (ev.origin !== NICO_ORIGIN) return;
       if (ev.source !== iframeRef.current?.contentWindow) return;
       const data = ev.data as unknown;
@@ -193,15 +191,26 @@ function NiconicoPlayer({
         data?: { playerStatus?: number };
       };
 
+      // Debug: surface the event name prominently so we can see the actual
+      // protocol in use without drilling into the collapsed data object.
+      // eslint-disable-next-line no-console
+      console.log("[nico→us]", d.eventName ?? "(no eventName)", d);
+
       if (d.eventName === "playerStatusChange") {
         const s = d.data?.playerStatus;
+        // Observed codes: 1=before play, 2=playing, 3=paused, 4=ended.
         if (s === 4) fireEnded();
       } else if (d.eventName === "ended" || d.eventName === "playerEnd") {
         fireEnded();
-      } else if (d.eventName === "loadComplete" || d.eventName === "playerMetadataChange") {
-        if (playingRef.current) {
+      } else if (d.eventName === "loadComplete") {
+        // Only `loadComplete` signals "ready". `playerMetadataChange` fires
+        // repeatedly during playback, so using it as a play trigger caused
+        // an infinite play-reset loop. We also guard with playSentRef so
+        // duplicate loadComplete events (if any) don't reset position.
+        if (playingRef.current && !playSentRef.current) {
+          playSentRef.current = true;
           // eslint-disable-next-line no-console
-          console.log("[us→nico] sending play command");
+          console.log("[us→nico] sending play command (once)");
           iframeRef.current?.contentWindow?.postMessage(
             {
               eventName: "play",
