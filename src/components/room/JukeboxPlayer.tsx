@@ -191,26 +191,19 @@ function NiconicoPlayer({
         data?: { playerStatus?: number };
       };
 
-      // Debug: surface the event name prominently so we can see the actual
-      // protocol in use without drilling into the collapsed data object.
-      // eslint-disable-next-line no-console
-      console.log("[nico→us]", d.eventName ?? "(no eventName)", d);
-
+      // Observed protocol (empirically verified):
+      //   - `loadComplete`            : once, right after the iframe is ready.
+      //   - `playerStatusChange`      : status=1 before play, 2 playing,
+      //                                 3 paused, 4 ended.
+      //   - `statusChange`            : duplicate of playerStatusChange (unused).
+      //   - `playerMetadataChange`    : fires repeatedly during playback.
       if (d.eventName === "playerStatusChange") {
-        const s = d.data?.playerStatus;
-        // Observed codes: 1=before play, 2=playing, 3=paused, 4=ended.
-        if (s === 4) fireEnded();
+        if (d.data?.playerStatus === 4) fireEnded();
       } else if (d.eventName === "ended" || d.eventName === "playerEnd") {
         fireEnded();
       } else if (d.eventName === "loadComplete") {
-        // Only `loadComplete` signals "ready". `playerMetadataChange` fires
-        // repeatedly during playback, so using it as a play trigger caused
-        // an infinite play-reset loop. We also guard with playSentRef so
-        // duplicate loadComplete events (if any) don't reset position.
         if (playingRef.current && !playSentRef.current) {
           playSentRef.current = true;
-          // eslint-disable-next-line no-console
-          console.log("[us→nico] sending play command (once)");
           iframeRef.current?.contentWindow?.postMessage(
             {
               eventName: "play",
@@ -238,10 +231,6 @@ function NiconicoPlayer({
       className="absolute inset-0 w-full h-full"
       allow="autoplay; encrypted-media; fullscreen"
       referrerPolicy="no-referrer-when-downgrade"
-      onLoad={() => {
-        // eslint-disable-next-line no-console
-        console.log("[nico iframe] onLoad fired for", track.externalId);
-      }}
     />
   );
 }
