@@ -11,6 +11,27 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "tn.smilevideo.jp" },
     ],
   },
+  async headers() {
+    // YouTube / SoundCloud / niconico の埋め込みプレイヤーが要求する機能を許可する。
+    // 未指定だと一部ブラウザが encrypted-media / autoplay をブロックし、
+    // "Permissions policy violation: encrypted-media is not allowed" が出る。
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Permissions-Policy",
+            value: [
+              'autoplay=(self "https://www.youtube.com" "https://www.youtube-nocookie.com" "https://w.soundcloud.com" "https://embed.nicovideo.jp")',
+              'encrypted-media=(self "https://www.youtube.com" "https://www.youtube-nocookie.com")',
+              'fullscreen=(self "https://www.youtube.com" "https://www.youtube-nocookie.com" "https://w.soundcloud.com" "https://embed.nicovideo.jp")',
+              "picture-in-picture=(self)",
+            ].join(", "),
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
