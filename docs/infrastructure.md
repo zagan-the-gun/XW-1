@@ -53,6 +53,33 @@ docker compose exec app npx prisma migrate deploy                 # 本番適用
 docker compose exec app npx prisma studio                         # GUI
 ```
 
+テスト系：
+
+```bash
+# 初回のみ: テスト用 DB (jukebox_test) を作成してマイグレーション反映
+docker compose exec app npm run test:setup
+
+# ユニット・API・Socket.io テスト（Vitest、コンテナ内実行）
+docker compose exec app npm test
+docker compose exec app npm run test:watch
+
+# E2E テスト（Playwright、ホスト側で実行）
+#   事前: docker compose up で dev サーバを立てておく
+#   事前: `npx playwright install chromium` でホスト側ブラウザを一度だけ入れる
+npm run test:e2e
+```
+
+テストの詳細は [architecture.md](./architecture.md) と、各テストディレクトリ (`tests/`, `e2e/`) の内容を参照。
+
+| テスト種別 | フレームワーク | DB | 実行場所 |
+|---|---|---|---|
+| ユニット (`tests/lib/**`) | Vitest | 不要 | app コンテナ内 |
+| API ルート (`tests/api/**`) | Vitest + 実 DB (Prisma) | `jukebox_test` | app コンテナ内 |
+| Socket.io (`tests/socket/**`) | Vitest + `socket.io` / `socket.io-client` | `jukebox_test` | app コンテナ内 |
+| E2E (`e2e/**`) | Playwright Chromium | `jukebox`（開発用 DB に書く） | ホスト側 |
+
+E2E は開発用 DB に「テスト用ルーム」を作って完結させるため、既存の開発データに干渉しない（作成したルームはテスト終了時に `DELETE /api/rooms/<slug>` で掃除する）。
+
 ## 3. 環境変数
 
 `.env.example` を元に `.env` を作成する。主なもの：

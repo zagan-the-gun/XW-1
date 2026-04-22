@@ -78,6 +78,9 @@ Dead Beef Saloon (`0xDEADBEEF`) は YouTube / SoundCloud / ニコニコ動画 / 
 
 - `docker compose exec app npm run lint` が通る
 - `docker compose exec app npx prisma generate` が通る（スキーマ変更時）
+- `docker compose exec app npm test` が通る（Vitest: ユニット / API / Socket.io）
+    - 初回は `docker compose exec app npm run test:setup` でテスト DB を用意
+- UI に影響する変更があれば `npm run test:e2e` も流す（Playwright、ホスト実行。事前に `npx playwright install chromium`）
 - 手元で `http://127.0.0.1:3000/` を開いて動作確認（Windows の場合）
 
 ## 質問があるとき

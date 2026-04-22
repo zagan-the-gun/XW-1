@@ -79,6 +79,7 @@ erDiagram
     Room {
         string slug UK
         bool loopPlayback
+        string passcode "nullable, 6桁英数字"
     }
     Track {
         enum platform "YOUTUBE|SOUNDCLOUD|NICONICO|VIMEO|WISTIA"
@@ -185,6 +186,8 @@ stateDiagram-v2
 |---|---|---|---|
 | `Room.loopPlayback` | DB（ルーム単位） | `true` | キュー全消化後、全 `PLAYED/SKIPPED` を `QUEUED` に戻して繰り返し |
 | | | `false` | キュー消化で停止 |
+| `Room.passcode` | DB（ルーム単位、平文保存） | 6桁英数字 | 鍵付きルーム。SSR/REST/Socket.io で `xw_passcode_<slug>` Cookie と等値比較して入室可否を判定 |
+| | | `null` | 鍵なし。誰でも入室可 |
 | `listening` | `localStorage:jukebox:listening:<slug>`（端末＋ルーム単位） | `true` | この端末で iframe を mount し、音を鳴らす（"スピーカー"） |
 | | | `false` | iframe を mount しない。キュー・曲名・コントロールバーのみ表示する"リモコン" |
 

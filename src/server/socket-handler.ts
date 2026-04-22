@@ -1,9 +1,11 @@
 import type { Server as SocketIOServer, Socket } from "socket.io";
 import { prisma } from "@/lib/prisma";
+import { verifyPasscodeFromCookieHeader } from "@/lib/room-auth";
 
 type JoinPayload = { roomSlug: string; userName: string };
 type AddTrackPayload = { roomSlug: string; trackId: string };
 type PlaybackPayload = { roomSlug: string; trackId?: string; positionSec?: number };
+type PasscodeChangedPayload = { roomSlug: string; passcode: string | null };
 
 type Participant = { socketId: string; name: string };
 
@@ -27,6 +29,15 @@ export function registerSocketHandlers(io: SocketIOServer) {
       if (!room) {
         socket.emit("error", { message: "Room not found" });
         return;
+      }
+      // 鍵付きルームは handshake Cookie の passcode が一致した socket のみ参加可能。
+      // REST の SSR ゲートと同じ Cookie を参照するため、ブラウザからは自動的に付く。
+      if (room.passcode) {
+        const cookieHeader = socket.handshake.headers.cookie;
+        if (!verifyPasscodeFromCookieHeader(roomSlug, cookieHeader, room.passcode)) {
+          socket.emit("error", { message: "Unauthorized" });
+          return;
+        }
       }
       currentRoom = roomSlug;
       await socket.join(roomSlug);
@@ -69,6 +80,12 @@ export function registerSocketHandlers(io: SocketIOServer) {
         socket.to(roomSlug).emit("settings_changed", { loopPlayback });
       },
     );
+
+    // パスコード変更通知。DB 更新は REST PATCH 側で完了済みで、これは単なる中継。
+    // 受信側クライアントは /auth に新パスコードを送って自分の Cookie を張り替える。
+    socket.on("passcode_changed", ({ roomSlug, passcode }: PasscodeChangedPayload) => {
+      socket.to(roomSlug).emit("passcode_changed", { passcode });
+    });
 
     // A new listener asks the room "what's playing and where?". Every
     // currently-listening peer that receives the query may reply; the

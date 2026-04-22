@@ -2,15 +2,28 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room, Track } from "@prisma/client";
-import { Headphones, HeadphoneOff, Repeat, Share2, Users, Wifi, WifiOff } from "lucide-react";
+import {
+  Headphones,
+  HeadphoneOff,
+  KeyRound,
+  Lock,
+  Repeat,
+  Share2,
+  Unlock,
+  Users,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 import { getSocket } from "@/lib/socket";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Toaster, useToaster } from "@/components/ui/Toast";
 import { JukeboxPlayer, type JukeboxPlayerHandle } from "./JukeboxPlayer";
 import { QueueList } from "./QueueList";
 import { AddTrackForm } from "./AddTrackForm";
 import { ParticipantList, type Participant } from "./ParticipantList";
 import { ShareDialog } from "./ShareDialog";
+import { PasscodeDialog } from "./PasscodeDialog";
 
 type RoomWithTracks = Room & { tracks: Track[] };
 
@@ -32,6 +45,9 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
   const [listening, setListening] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
+  const [passcodeOpen, setPasscodeOpen] = useState(false);
+  const [passcode, setPasscode] = useState<string | null>(initialRoom.passcode);
+  const { toasts, push: pushToast, dismiss: dismissToast } = useToaster();
   const [userName] = useState(() => {
     if (typeof window === "undefined") return "guest";
     const key = "jukebox:userName";
@@ -114,6 +130,30 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
       }
     };
 
+    // 他の参加者がパスコードを追加/再生成/削除した。自分の Cookie を自動で
+    // 張り替えて「鍵が変わって締め出される」体験を避ける（案A の自動追従）。
+    const onPasscodeChanged = async ({ passcode: next }: { passcode: string | null }) => {
+      try {
+        if (next) {
+          await fetch(`/api/rooms/${room.slug}/auth`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ passcode: next }),
+          });
+        } else {
+          await fetch(`/api/rooms/${room.slug}/auth`, { method: "DELETE" });
+        }
+      } catch {
+        // Cookie 更新失敗時は次回リロードで Gate に落ちる。今は継続を優先。
+      }
+      setPasscode(next);
+      pushToast(
+        next
+          ? { message: `パスコードが ${next} に変更されました`, tone: "info", icon: <Lock className="h-4 w-4" /> }
+          : { message: "パスコードが解除されました", tone: "info", icon: <Unlock className="h-4 w-4" /> },
+      );
+    };
+
     // Another peer just flipped their listening toggle ON and wants to know
     // what's playing. Only respond if we're actively listening with a track
     // so the requester gets a real, current position.
@@ -149,6 +189,7 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     socket.on("pause", onPause);
     socket.on("skip", onSkip);
     socket.on("settings_changed", onSettingsChanged);
+    socket.on("passcode_changed", onPasscodeChanged);
     socket.on("state_query", onStateQuery);
     socket.on("state_reply", onStateReply);
 
@@ -163,10 +204,11 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
       socket.off("pause", onPause);
       socket.off("skip", onSkip);
       socket.off("settings_changed", onSettingsChanged);
+      socket.off("passcode_changed", onPasscodeChanged);
       socket.off("state_query", onStateQuery);
       socket.off("state_reply", onStateReply);
     };
-  }, [room.slug, userName, refreshTracks]);
+  }, [room.slug, userName, refreshTracks, pushToast]);
 
   const emit = useCallback(
     (event: string, payload: Record<string, unknown> = {}) => {
@@ -383,6 +425,30 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     setShareOpen(true);
   }, [room.slug]);
 
+  // 自分がダイアログから PATCH を叩いて passcode を変更した後のコールバック。
+  // サーバ側で DB は更新済み。自分の Cookie も PATCH のレスポンスで張り替わっている。
+  // 残作業は state 更新と、他の参加者への Socket 通知、自分向けトースト表示。
+  const handlePasscodeLocalChange = useCallback(
+    (next: string | null) => {
+      setPasscode(next);
+      getSocket().emit("passcode_changed", { roomSlug: room.slug, passcode: next });
+      pushToast(
+        next
+          ? {
+              message: `パスコードを ${next} に設定しました`,
+              tone: "success",
+              icon: <Lock className="h-4 w-4" />,
+            }
+          : {
+              message: "パスコードを解除しました",
+              tone: "success",
+              icon: <Unlock className="h-4 w-4" />,
+            },
+      );
+    },
+    [room.slug, pushToast],
+  );
+
   const headerSubtitle = useMemo(
     () => (listening ? "この端末で再生中" : "リモコンモード（音は鳴りません）"),
     [listening],
@@ -442,6 +508,18 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
               >
                 <Repeat className="h-4 w-4" />
                 ループ
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPasscodeOpen(true)}
+                aria-pressed={Boolean(passcode)}
+                title={passcode ? "パスコードを管理（鍵あり）" : "パスコードを管理（鍵なし）"}
+                className={passcode ? "!border-primary/70 !text-primary !bg-primary/10" : ""}
+                data-testid="passcode-button"
+              >
+                {passcode ? <Lock className="h-4 w-4" /> : <KeyRound className="h-4 w-4" />}
+                鍵
               </Button>
               <Button variant="outline" size="sm" onClick={handleShare}>
                 <Share2 className="h-4 w-4" />
@@ -504,6 +582,16 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
         title={room.name}
         url={shareUrl}
       />
+
+      <PasscodeDialog
+        open={passcodeOpen}
+        onClose={() => setPasscodeOpen(false)}
+        slug={room.slug}
+        passcode={passcode}
+        onChanged={handlePasscodeLocalChange}
+      />
+
+      <Toaster toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

@@ -2,10 +2,17 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { generateRoomSlug } from "@/lib/slug";
+import { RoomPasscodeSchema, generateRoomPasscode } from "@/lib/passcode";
+import { buildSetPasscodeCookie } from "@/lib/room-auth";
 
+// passcode を直接受け取るのは、作成フォームがクライアント側で事前生成したものを
+// 「表示したパスコードと作ったルームのパスコードが一致」させたいため。
+// 省略時は withPasscode:true のフォールバックでサーバ側生成する。
 const CreateRoomSchema = z.object({
   name: z.string().min(1).max(80),
   isPublic: z.boolean().default(false),
+  withPasscode: z.boolean().default(false),
+  passcode: RoomPasscodeSchema.optional(),
 });
 
 export async function GET() {
@@ -14,7 +21,13 @@ export async function GET() {
     take: 50,
     include: { _count: { select: { tracks: true } } },
   });
-  return NextResponse.json({ rooms });
+
+  const redacted = rooms.map(({ passcode, ...rest }) => ({
+    ...rest,
+    hasPasscode: Boolean(passcode),
+  }));
+
+  return NextResponse.json({ rooms: redacted });
 }
 
 export async function POST(req: Request) {
@@ -31,13 +44,41 @@ export async function POST(req: Request) {
     slug = generateRoomSlug();
   }
 
+  let passcode: string | null = null;
+  if (parsed.data.passcode) {
+    passcode = parsed.data.passcode;
+  } else if (parsed.data.withPasscode) {
+    passcode = generateRoomPasscode();
+  }
+
   const room = await prisma.room.create({
     data: {
       name: parsed.data.name,
       slug,
       isPublic: parsed.data.isPublic,
+      passcode,
     },
   });
 
-  return NextResponse.json({ room }, { status: 201 });
+  const res = NextResponse.json(
+    {
+      room: {
+        id: room.id,
+        name: room.name,
+        slug: room.slug,
+        hostId: room.hostId,
+        isPublic: room.isPublic,
+        loopPlayback: room.loopPlayback,
+        createdAt: room.createdAt,
+        updatedAt: room.updatedAt,
+        hasPasscode: Boolean(passcode),
+      },
+      passcode,
+    },
+    { status: 201 },
+  );
+  if (passcode) {
+    res.headers.append("Set-Cookie", buildSetPasscodeCookie(slug, passcode));
+  }
+  return res;
 }

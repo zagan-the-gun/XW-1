@@ -26,9 +26,11 @@ src/components/
 ├── ui/                            再利用可能な汎用UI（tailwind + clsx）
 │   ├── Button.tsx
 │   ├── Card.tsx
-│   └── Input.tsx
+│   ├── Input.tsx
+│   ├── Switch.tsx                 アクセシブルなトグル（role=switch）
+│   └── Toast.tsx                  トースト通知（Toaster + useToaster フック）
 ├── home/                          ホームページ専用
-│   ├── CreateRoomForm.tsx         ルーム作成（ルーム名のみ）
+│   ├── CreateRoomForm.tsx         ルーム作成（ルーム名 + パスコード付きスライドトグル）
 │   └── JoinRoomForm.tsx           コード/URL → /room/[slug] へ遷移
 └── room/                          ルームページ専用
     ├── RoomClient.tsx             ⭐ ルーム画面の中核
@@ -36,7 +38,9 @@ src/components/
     ├── QueueList.tsx              キュー表示・選択・削除
     ├── AddTrackForm.tsx           URL 入力フォーム
     ├── ParticipantList.tsx        参加者表示
-    └── ShareDialog.tsx            共有モーダル（URLコピー / QRコード / OS共有シート呼び出し）
+    ├── ShareDialog.tsx            共有モーダル（URLコピー / QRコード / OS共有シート呼び出し）
+    ├── PasscodeGate.tsx           鍵付きルーム未認証時の入力画面（SSR で passcode Cookie 不一致時に表示）
+    └── PasscodeDialog.tsx         ルーム内からのパスコード追加/再生成/削除モーダル
 ```
 
 ## 3. `RoomClient` の状態管理
@@ -105,6 +109,7 @@ Socket は全ルームで常時接続。
 - `pause` → `isPlaying=false`
 - `skip` → `handleEnded()` を呼び出し（誰が押しても全員進む）
 - `settings_changed` → `room.loopPlayback` を更新
+- `passcode_changed` → 他の参加者がパスコードを追加/再生成/削除した通知。**自動追従**（案A）のため、受信側は自分の Cookie を更新する (`POST /api/rooms/[slug]/auth` で新パスコードをセット、または `DELETE` で削除) → `passcode` state を差し替え → トースト表示。これにより既存メンバーは締め出されずに継続操作できる
 - `state_query` → 自分が `listening=true` && `isPlaying=true` で曲があるとき、`playerRef.current.getCurrentTime()` を `state_reply` で返す
 - `state_reply` → `pendingStateQueryRef.current` が立っているときだけ採用、`setCurrentIndex` + 500ms 後に `seekTo`（iframe mount 待ち）。**最初の 1 件で `pendingStateQueryRef` をクリア**して以降は無視（race-based）
 
@@ -203,7 +208,45 @@ isNico
 3. **"ended" が飛ばないことがある**（ミュートタブのスロットリング等） → `track.durationSec + 3秒` の `setTimeout` で保険の自動遷移
 4. **`jsapi=1` は HTTPS オリジン必須** → `http://localhost` だと `/play` エンドポイントが 403 を返し、「プレーヤーを更新…」オーバーレイが出る。本番は HTTPS で運用すること
 
-## 5. 共有モーダル (`ShareDialog`)
+## 5. パスコードゲート / 管理モーダル
+
+### `PasscodeGate`
+
+`src/components/room/PasscodeGate.tsx`。鍵付きルームで `passcode` Cookie が不一致または未設定のとき、`/room/[slug]/page.tsx` の SSR がこのコンポーネントだけを返す（`RoomClient` は mount されない＝そもそも iframe や Socket に繋がない）。
+
+- 6桁の英数字（大文字）を入力 → `POST /api/rooms/[slug]/auth` で検証 → 成功すると Set-Cookie が返るので `router.refresh()` で SSR を再実行、以降は通常の `RoomClient` が描画される
+- 不正解は `401`、赤字メッセージで通知
+
+### `PasscodeDialog`
+
+`src/components/room/PasscodeDialog.tsx`。ルーム内ヘッダーの鍵ボタンから呼ぶ管理モーダル。
+
+| 状態 | 表示 |
+|---|---|
+| 鍵なし | 「パスコードを設定する」ボタン → `PATCH /api/rooms/[slug] { passcode: "regenerate" }` |
+| 鍵あり | 現在のパスコードを大きく表示 + コピーボタン + 「再生成」と「鍵を外す」ボタン |
+
+変更が成功するとレスポンスに新パスコード（または null）が載るので、`onChanged(next)` でルーム側に伝える。ルーム側は state を更新し、`emit("passcode_changed", { passcode: next })` で他の参加者に通知する。
+
+### 自動追従（案A）のフロー
+
+```mermaid
+sequenceDiagram
+    participant A as A (変更する人)
+    participant S as Socket
+    participant B as B (既存メンバー)
+    participant API as REST
+
+    A->>API: PATCH /rooms/slug { passcode: "regenerate" }
+    API-->>A: 200 + Set-Cookie (新値)
+    A->>S: emit passcode_changed { passcode: 新値 }
+    S-->>B: passcode_changed { passcode: 新値 }
+    B->>API: POST /rooms/slug/auth { passcode: 新値 }
+    API-->>B: 200 + Set-Cookie (新値)
+    Note over B: 自動で Cookie 差し替え完了<br/>トースト表示、リロードしても Gate に落ちない
+```
+
+## 6. 共有モーダル (`ShareDialog`)
 
 `src/components/room/ShareDialog.tsx`。ヘッダーの「共有」ボタン (`RoomClient` 内 `handleShare`) が `shareOpen` を `true` にして開く自前モーダル。
 
@@ -221,7 +264,7 @@ UX 上の挙動：
 - モーダルを閉じるたびに `copied` state をリセット
 - URL 入力欄は `readOnly` + `onFocus` で全選択（コピーが効かない環境でも手動コピーしやすいように）
 
-## 6. Socket.io クライアント
+## 7. Socket.io クライアント
 
 `src/lib/socket.ts` がシングルトン：
 
@@ -242,14 +285,14 @@ export function getSocket(): Socket {
 - WebSocket を優先、ダメなら polling フォールバック
 - `RoomClient` の `useEffect` クリーンアップでリスナー解除はするが、接続自体は維持（タブ内で再利用）
 
-## 7. スタイリング
+## 8. スタイリング
 
 - **Tailwind CSS** + カスタム CSS 変数（`globals.css` のテーマトークン: `--primary`, `--border`, `--muted-foreground` など）
 - ユーティリティ合成は `cn()` (`src/lib/utils.ts` → `clsx` + `tailwind-merge`) を使う
 - アイコンは **lucide-react**（`Play`, `Pause`, `SkipForward`, `Disc3`, `Repeat`, `Users`, `Wifi`/`WifiOff`, `Share2` 等）
 - ダークテーマ前提。`bg-gradient-hero` の背景を `<body>` に敷いている
 
-## 8. 画像ドメインの登録
+## 9. 画像ドメインの登録
 
 外部サムネイルを `<img>` で扱う場合、Next.js の `<Image>` を使うなら `next.config.ts` の `images.remotePatterns` に追加が必要。現在の許可リスト：
 
@@ -260,7 +303,7 @@ export function getSocket(): Socket {
 - `embed-ssl.wistia.com` / `embed-fastly.wistia.com` / `embedwistia-a.akamaihd.net`（Wistia）
 現状 `QueueList` では `<img>` (`no-img-element` の eslint-disable 付き) を使っていて Next.js Image は未使用だが、将来切り替える際はここを更新する。
 
-## 9. ユーザー識別
+## 10. ユーザー識別
 
 認証は未実装。`localStorage` の `jukebox:userName` にランダムな `guest-xxxx` を保存し、Socket の `join_room` で渡す。
 
@@ -268,7 +311,7 @@ export function getSocket(): Socket {
 - 消せば別人になる
 - **本格運用時は認証（NextAuth等）の導入が必要**（Phase 4）
 
-## 10. 新ページ / 新機能を追加する時のチェックリスト
+## 11. 新ページ / 新機能を追加する時のチェックリスト
 
 1. ページ追加なら `src/app/xxx/page.tsx` を作る（SSR 必要なら `dynamic = "force-dynamic"`）
 2. API が必要なら [backend.md](./backend.md) のルートにエンドポイント追加、Zodで入力バリデーション
