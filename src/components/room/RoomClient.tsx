@@ -10,6 +10,7 @@ import { JukeboxPlayer, type JukeboxPlayerHandle } from "./JukeboxPlayer";
 import { QueueList } from "./QueueList";
 import { AddTrackForm } from "./AddTrackForm";
 import { ParticipantList, type Participant } from "./ParticipantList";
+import { ShareDialog } from "./ShareDialog";
 
 type RoomWithTracks = Room & { tracks: Track[] };
 
@@ -29,6 +30,8 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
   // no video, but the user can still see the queue and press play/skip/etc.
   // to drive what the other listeners hear).
   const [listening, setListening] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
   const [userName] = useState(() => {
     if (typeof window === "undefined") return "guest";
     const key = "jukebox:userName";
@@ -375,19 +378,10 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     });
   }, [room.slug]);
 
-  const handleShare = useCallback(async () => {
-    const url = `${window.location.origin}/room/${room.slug}`;
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: room.name, url });
-      } else {
-        await navigator.clipboard.writeText(url);
-        alert("ルームURLをコピーしました");
-      }
-    } catch {
-      // ignore
-    }
-  }, [room.slug, room.name]);
+  const handleShare = useCallback(() => {
+    setShareUrl(`${window.location.origin}/room/${room.slug}`);
+    setShareOpen(true);
+  }, [room.slug]);
 
   const headerSubtitle = useMemo(
     () => (listening ? "この端末で再生中" : "リモコンモード（音は鳴りません）"),
@@ -503,6 +497,13 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
           />
         </Card>
       </aside>
+
+      <ShareDialog
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        title={room.name}
+        url={shareUrl}
+      />
     </div>
   );
 }

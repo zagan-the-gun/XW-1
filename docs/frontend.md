@@ -35,7 +35,8 @@ src/components/
     ├── JukeboxPlayer.tsx          プレイヤー（react-player + niconico独自、listening=false で iframe 非描画）
     ├── QueueList.tsx              キュー表示・選択・削除
     ├── AddTrackForm.tsx           URL 入力フォーム
-    └── ParticipantList.tsx        参加者表示
+    ├── ParticipantList.tsx        参加者表示
+    └── ShareDialog.tsx            共有モーダル（URLコピー / QRコード / OS共有シート呼び出し）
 ```
 
 ## 3. `RoomClient` の状態管理
@@ -202,7 +203,25 @@ isNico
 3. **"ended" が飛ばないことがある**（ミュートタブのスロットリング等） → `track.durationSec + 3秒` の `setTimeout` で保険の自動遷移
 4. **`jsapi=1` は HTTPS オリジン必須** → `http://localhost` だと `/play` エンドポイントが 403 を返し、「プレーヤーを更新…」オーバーレイが出る。本番は HTTPS で運用すること
 
-## 5. Socket.io クライアント
+## 5. 共有モーダル (`ShareDialog`)
+
+`src/components/room/ShareDialog.tsx`。ヘッダーの「共有」ボタン (`RoomClient` 内 `handleShare`) が `shareOpen` を `true` にして開く自前モーダル。
+
+`navigator.share` を直接呼んでいた旧実装は OS の共有シートに委ねていたため、**Windows では「リンクをコピー」や QR コードがあるのに macOS では無い**という差が出ていた（Chrome 側の違いではなく OS 共有シートの差）。これをアプリ側で吸収するために、どの OS でも同じ UI を出す。
+
+モーダルの内容：
+
+- QR コード（`qrcode.react` の `QRCodeSVG`、176px、`level="M"`）
+- ルーム URL の表示 + 「コピー」ボタン（`navigator.clipboard.writeText` → 1.8 秒だけ「コピー済」に切り替え）
+- 「他のアプリで共有」ボタン（`navigator.share` を呼ぶ）。ブラウザが Web Share API 非対応なら **ボタン自体を非表示**（`canNativeShare` を mount 時に判定）
+
+UX 上の挙動：
+
+- 背景クリックと `Esc` キーで閉じる
+- モーダルを閉じるたびに `copied` state をリセット
+- URL 入力欄は `readOnly` + `onFocus` で全選択（コピーが効かない環境でも手動コピーしやすいように）
+
+## 6. Socket.io クライアント
 
 `src/lib/socket.ts` がシングルトン：
 
@@ -223,14 +242,14 @@ export function getSocket(): Socket {
 - WebSocket を優先、ダメなら polling フォールバック
 - `RoomClient` の `useEffect` クリーンアップでリスナー解除はするが、接続自体は維持（タブ内で再利用）
 
-## 6. スタイリング
+## 7. スタイリング
 
 - **Tailwind CSS** + カスタム CSS 変数（`globals.css` のテーマトークン: `--primary`, `--border`, `--muted-foreground` など）
 - ユーティリティ合成は `cn()` (`src/lib/utils.ts` → `clsx` + `tailwind-merge`) を使う
 - アイコンは **lucide-react**（`Play`, `Pause`, `SkipForward`, `Disc3`, `Repeat`, `Users`, `Wifi`/`WifiOff`, `Share2` 等）
 - ダークテーマ前提。`bg-gradient-hero` の背景を `<body>` に敷いている
 
-## 7. 画像ドメインの登録
+## 8. 画像ドメインの登録
 
 外部サムネイルを `<img>` で扱う場合、Next.js の `<Image>` を使うなら `next.config.ts` の `images.remotePatterns` に追加が必要。現在の許可リスト：
 
@@ -241,7 +260,7 @@ export function getSocket(): Socket {
 - `embed-ssl.wistia.com` / `embed-fastly.wistia.com` / `embedwistia-a.akamaihd.net`（Wistia）
 現状 `QueueList` では `<img>` (`no-img-element` の eslint-disable 付き) を使っていて Next.js Image は未使用だが、将来切り替える際はここを更新する。
 
-## 8. ユーザー識別
+## 9. ユーザー識別
 
 認証は未実装。`localStorage` の `jukebox:userName` にランダムな `guest-xxxx` を保存し、Socket の `join_room` で渡す。
 
@@ -249,7 +268,7 @@ export function getSocket(): Socket {
 - 消せば別人になる
 - **本格運用時は認証（NextAuth等）の導入が必要**（Phase 4）
 
-## 9. 新ページ / 新機能を追加する時のチェックリスト
+## 10. 新ページ / 新機能を追加する時のチェックリスト
 
 1. ページ追加なら `src/app/xxx/page.tsx` を作る（SSR 必要なら `dynamic = "force-dynamic"`）
 2. API が必要なら [backend.md](./backend.md) のルートにエンドポイント追加、Zodで入力バリデーション
