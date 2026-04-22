@@ -80,6 +80,7 @@ erDiagram
         string slug UK
         bool loopPlayback
         string passcode "nullable, 6桁英数字"
+        datetime lastOccupiedAt "空室TTLの基準"
     }
     Track {
         enum platform "YOUTUBE|SOUNDCLOUD|NICONICO|VIMEO|WISTIA"
@@ -211,3 +212,4 @@ stateDiagram-v2
 - 認証なし。`Room.hostId` はスキーマにはあるが未活用（将来のため枠だけ用意）
 - `participantsByRoom` は**プロセス内Map**で管理（複数インスタンス化する場合は Redis 等への外出しが必要）
 - ニコニコ動画の `jsapi=1` は HTTPS オリジンでのみ動作するため、ローカル HTTP では正常動作しないことがある（[frontend.md](./frontend.md#ニコニコ動画プレイヤーの特殊事情) 参照）
+- ルームの空室 TTL クリーンアップ（`Room.lastOccupiedAt` + [backend.md §5](./backend.md#5-ルーム自動削除空室-ttl)）も単一プロセス前提。鍵を失って削除不能になったルームはこの TTL で時間経過後に回収される

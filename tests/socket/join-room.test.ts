@@ -88,4 +88,58 @@ describe("socket join_room", () => {
     const err = await waitForEvent<{ message: string }>(client, "error");
     expect(err.message).toBe("Room not found");
   });
+
+  it("join_room で Room.lastOccupiedAt が更新される（空室 TTL リセット）", async () => {
+    const past = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await prisma.room.create({
+      data: { name: "touch-join", slug: "touch-001", lastOccupiedAt: past },
+    });
+
+    const client = harness.makeClient();
+    await new Promise<void>((resolve) => client.on("connect", resolve));
+    client.emit("join_room", { roomSlug: "touch-001", userName: "alice" });
+    await waitForEvent(client, "participants");
+    // touchRoomOccupancy は await しているが、クライアント側は participants 受信後に
+    // 戻ってくるだけなので、DB 反映を少しだけ待つ。
+    await new Promise((r) => setTimeout(r, 50));
+
+    const after = await prisma.room.findUnique({ where: { slug: "touch-001" } });
+    expect(after!.lastOccupiedAt.getTime()).toBeGreaterThan(past.getTime());
+  });
+
+  it("最後の 1 人が leave_room で抜けたときに lastOccupiedAt が更新される", async () => {
+    const past = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await prisma.room.create({
+      data: { name: "touch-leave", slug: "touch-002", lastOccupiedAt: past },
+    });
+
+    // 観測役として 2 つめのクライアントを room に残して、抜ける 1 人目 → 0 人の挙動を検証する。
+    const observer = harness.makeClient();
+    await new Promise<void>((resolve) => observer.on("connect", resolve));
+    observer.emit("join_room", { roomSlug: "touch-002", userName: "bob" });
+    await waitForEvent(observer, "participants");
+
+    const leaver = harness.makeClient();
+    await new Promise<void>((resolve) => leaver.on("connect", resolve));
+    leaver.emit("join_room", { roomSlug: "touch-002", userName: "alice" });
+    // observer 側で alice 参加の participants を受け取るのを待つ
+    await waitForEvent(observer, "participants");
+
+    // observer を先に抜けさせて部屋を leaver 1 人にする
+    observer.emit("leave_room", { roomSlug: "touch-002" });
+    await waitForEvent(leaver, "participants");
+
+    // ここで DB を過去に戻し、最後の 1 人が抜けたときの touch を確認する
+    await prisma.room.update({
+      where: { slug: "touch-002" },
+      data: { lastOccupiedAt: past },
+    });
+
+    leaver.emit("leave_room", { roomSlug: "touch-002" });
+    // leaver 自身は leave 後 broadcast を受け取れないので、DB への touch を時間で待つ
+    await new Promise((r) => setTimeout(r, 150));
+
+    const after = await prisma.room.findUnique({ where: { slug: "touch-002" } });
+    expect(after!.lastOccupiedAt.getTime()).toBeGreaterThan(past.getTime());
+  });
 });

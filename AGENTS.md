@@ -38,7 +38,7 @@ Dead Beef Saloon (`0xDEADBEEF`) は YouTube / SoundCloud / ニコニコ動画 / 
 - **Zod** で入力バリデーション（`src/app/api/*/route.ts` のパターンを踏襲）
 - **Prisma Client** は `src/lib/prisma.ts` のシングルトンを使う（新たに `new PrismaClient()` しない）
 - **クライアント状態** は `useState` ベース。Redux 等のグローバル状態管理は導入しない
-- **Socket は通知、REST は正本**: Socket ハンドラで DB を更新しない。Socket を受けたら `GET /tracks` で refetch させる
+- **Socket は通知、REST は正本**: Socket ハンドラで DB を更新しない。Socket を受けたら `GET /tracks` で refetch させる。**例外**: `Room.lastOccupiedAt` の touch は Socket ハンドラで行う（空室 TTL クリーンアップ用のライブネス信号。ドメイン状態ではない。詳細は [docs/backend.md §5](./docs/backend.md#5-ルーム自動削除空室-ttl)）
 - **コメント**: コードから自明な内容は書かない。非自明な制約・トレードオフだけ書く（例: ニコニコ動画の postMessage プロトコル実装コメント）
 - **絵文字は使わない**（ユーザー要望）
 

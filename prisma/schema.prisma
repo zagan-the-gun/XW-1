@@ -34,20 +34,22 @@ model User {
 }
 
 model Room {
-  id           String       @id @default(cuid())
-  name         String
-  slug         String       @unique
-  hostId       String?
-  isPublic     Boolean      @default(false)
-  loopPlayback Boolean      @default(false)
-  passcode     String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id             String       @id @default(cuid())
+  name           String
+  slug           String       @unique
+  hostId         String?
+  isPublic       Boolean      @default(false)
+  loopPlayback   Boolean      @default(false)
+  passcode       String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  lastOccupiedAt DateTime     @default(now())
 
   host    User?   @relation("HostedRooms", fields: [hostId], references: [id], onDelete: SetNull)
   tracks  Track[]
 
   @@index([createdAt])
+  @@index([lastOccupiedAt])
 }
 
 model Track {

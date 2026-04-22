@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import next from "next";
 import { Server as SocketIOServer } from "socket.io";
 import { registerSocketHandlers } from "./src/server/socket-handler";
+import { startRoomCleanup } from "./src/server/room-cleanup";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOST || "0.0.0.0";
@@ -23,6 +24,7 @@ async function main() {
   });
 
   registerSocketHandlers(io);
+  startRoomCleanup();
 
   httpServer.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`);

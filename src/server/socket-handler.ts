@@ -20,6 +20,37 @@ function getParticipants(roomSlug: string) {
   return map;
 }
 
+// 参加者が 0 人になった瞬間 / 再び入室した瞬間に Room.lastOccupiedAt を「今」に更新する。
+// クリーンアップは「lastOccupiedAt が TTL を超えて古い」ルームだけを対象にするので、
+// ここで touch し忘れると生きているルームまで削除される。
+// DB 失敗でアプリを落としたくないので catch して黙殺（次回の join/leave/sweep で自己回復する）。
+async function touchRoomOccupancy(roomSlug: string) {
+  try {
+    await prisma.room.update({
+      where: { slug: roomSlug },
+      data: { lastOccupiedAt: new Date() },
+    });
+  } catch {
+    // ルームが既に削除されている等は無視
+  }
+}
+
+// テスト用: 参加者マップを外部から掃除できるようにする（プロセス内 Map なのでテスト間で漏れる）
+export function __resetParticipantsForTest() {
+  participantsByRoom.clear();
+}
+
+// クリーンアップ側から「今この瞬間、誰かいるルーム」の slug 一覧を取得するための出口。
+// sweep のたびにこれらのルームの lastOccupiedAt を「今」に更新しておくことで、
+// 長時間稼働中のルームが TTL 到達で消されるのを防ぐ（server プロセス再起動時のみ一旦リセット）。
+export function getOccupiedRoomSlugs(): string[] {
+  const out: string[] = [];
+  for (const [slug, map] of participantsByRoom) {
+    if (map.size > 0) out.push(slug);
+  }
+  return out;
+}
+
 export function registerSocketHandlers(io: SocketIOServer) {
   io.on("connection", (socket: Socket) => {
     let currentRoom: string | null = null;
@@ -44,6 +75,8 @@ export function registerSocketHandlers(io: SocketIOServer) {
       const participants = getParticipants(roomSlug);
       participants.set(socket.id, { socketId: socket.id, name: userName || "guest" });
       io.to(roomSlug).emit("participants", Array.from(participants.values()));
+      // 参加のたびに lastOccupiedAt をリセット。空室 TTL のカウントをここで 0 に戻す。
+      await touchRoomOccupancy(roomSlug);
     });
 
     socket.on("leave_room", async ({ roomSlug }: { roomSlug: string }) => {
@@ -52,6 +85,11 @@ export function registerSocketHandlers(io: SocketIOServer) {
       participants.delete(socket.id);
       io.to(roomSlug).emit("participants", Array.from(participants.values()));
       currentRoom = null;
+      // 退出で 0 人になった場合、その「最後の瞬間」を lastOccupiedAt に記録する。
+      // ここから TTL 日数経過で削除対象になる。
+      if (participants.size === 0) {
+        await touchRoomOccupancy(roomSlug);
+      }
     });
 
     socket.on("track_added", ({ roomSlug, trackId }: AddTrackPayload) => {
@@ -112,9 +150,13 @@ export function registerSocketHandlers(io: SocketIOServer) {
 
     socket.on("disconnect", () => {
       if (currentRoom) {
-        const participants = getParticipants(currentRoom);
+        const roomSlug = currentRoom;
+        const participants = getParticipants(roomSlug);
         participants.delete(socket.id);
-        io.to(currentRoom).emit("participants", Array.from(participants.values()));
+        io.to(roomSlug).emit("participants", Array.from(participants.values()));
+        if (participants.size === 0) {
+          void touchRoomOccupancy(roomSlug);
+        }
       }
     });
   });
