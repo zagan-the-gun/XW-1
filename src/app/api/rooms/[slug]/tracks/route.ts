@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { fetchMetadata } from "@/lib/metadata";
+import { MAX_TRACKS_PER_ROOM } from "@/lib/constants";
 
 const AddTrackSchema = z.object({
   url: z.string().url(),
@@ -30,6 +31,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const room = await prisma.room.findUnique({ where: { slug } });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
+
+  // Cap total tracks (including PLAYED/SKIPPED) before touching the external
+  // oEmbed APIs so the limit also protects us from metadata-fetch abuse.
+  const trackCount = await prisma.track.count({ where: { roomId: room.id } });
+  if (trackCount >= MAX_TRACKS_PER_ROOM) {
+    return NextResponse.json(
+      { error: `ルームのキューは ${MAX_TRACKS_PER_ROOM} 件までです` },
+      { status: 409 },
+    );
+  }
 
   const meta = await fetchMetadata(parsed.data.url);
   if (!meta) {
