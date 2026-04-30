@@ -8,11 +8,10 @@ import { Input } from "@/components/ui/Input";
 
 type Props = {
   roomSlug: string;
-  insertAfterTrackId?: string;
   onAdded: (track: Track) => void;
 };
 
-export function AddTrackForm({ roomSlug, insertAfterTrackId, onAdded }: Props) {
+export function AddTrackForm({ roomSlug, onAdded }: Props) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -27,7 +26,7 @@ export function AddTrackForm({ roomSlug, insertAfterTrackId, onAdded }: Props) {
       const res = await fetch(`/api/rooms/${roomSlug}/tracks`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url: trimmed, insertAfterTrackId }),
+        body: JSON.stringify({ url: trimmed }),
       });
       const data = await res.json();
       if (!res.ok) {
