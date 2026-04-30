@@ -269,13 +269,38 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     [room.slug, emit],
   );
 
+  // Clicking a queue row jumps to that track. Everything before it is marked
+  // PLAYED and the target + everything after is reset to QUEUED, so the
+  // natural advance after this track resumes from "the next one in the list".
   const handleSelect = useCallback(
     (idx: number) => {
+      const target = tracks[idx];
+      if (!target) return;
+
+      setTracks((prev) =>
+        prev.map((t, i) => {
+          if (i < idx) return t.status === "QUEUED" ? { ...t, status: "PLAYED" as const } : t;
+          if (t.status === "PLAYED" || t.status === "SKIPPED") {
+            return { ...t, status: "QUEUED" as const };
+          }
+          return t;
+        }),
+      );
       setCurrentIndex(idx);
       setIsPlaying(true);
-      emit("play", { trackId: tracks[idx]?.id, positionSec: 0 });
+      emit("play", { trackId: target.id, positionSec: 0 });
+
+      fetch(`/api/rooms/${room.slug}/tracks/${target.id}/select`, {
+        method: "POST",
+      })
+        .then((res) => {
+          if (!res.ok) return;
+          // Notify other peers; they refetch via queue_changed listener.
+          emit("queue_changed");
+        })
+        .catch(() => {});
     },
-    [tracks, emit],
+    [tracks, emit, room.slug],
   );
 
   const handleTogglePlay = useCallback(() => {

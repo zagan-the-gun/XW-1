@@ -104,7 +104,7 @@ flowchart LR
 Socket は全ルームで常時接続。
 
 - `participants` → state 更新
-- `track_added` / `queue_changed` → `refreshTracks()` で DB から refetch
+- `track_added` / `queue_changed` → `refreshTracks()` で DB から refetch（クリック「ジャンプ」による status 一括書き換えもこの経路で他端末に反映される）
 - `play` → `currentIndex` と `isPlaying` を更新（listening=false でも UI を反映するため受け取る）
 - `pause` → `isPlaying=false`
 - `skip` → `handleEnded()` を呼び出し（誰が押しても全員進む）
@@ -128,6 +128,17 @@ Socket は全ルームで常時接続。
 3. `refreshTracks()` で DB の正本を再取得し、全員の position を完全一致させる
 
 この「楽観更新→再取得」パターンで、UI 応答性と整合性を両立している。
+
+### キュー上の曲をクリックしたとき
+
+`QueueList` 上の曲をクリックすると `handleSelect(idx)` が走る。挙動：
+
+1. 楽観的に `tracks` の `status` を書き換える（`idx` 未満で `QUEUED` だったものを `PLAYED` に、`idx` 以降の `PLAYED/SKIPPED` を `QUEUED` に）
+2. `currentIndex = idx` / `isPlaying = true`
+3. `emit("play", { trackId, positionSec: 0 })` で他端末の再生も同期
+4. `POST /tracks/[trackId]/select` を叩いて DB 上の正本を一括書き換え。成功したら `emit("queue_changed")` で他端末に refetch を促す
+
+これにより、クリック以前は再生済みとして淡色表示され、以降は未再生として並ぶ「再生履歴の整合」が取れる。
 
 ## 4. `JukeboxPlayer` の再生制御
 
