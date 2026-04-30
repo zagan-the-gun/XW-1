@@ -6,7 +6,6 @@ import { MAX_TRACKS_PER_ROOM } from "@/lib/constants";
 
 const AddTrackSchema = z.object({
   url: z.string().url(),
-  insertAfterTrackId: z.string().optional(),
 });
 
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
@@ -51,46 +50,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
   }
 
   const track = await prisma.$transaction(async (tx) => {
-    const anchorId = parsed.data.insertAfterTrackId;
-    if (anchorId) {
-      const anchor = await tx.track.findFirst({
-        where: { id: anchorId, roomId: room.id },
-      });
-      if (anchor) {
-        // Find the end of the contiguous "QUEUED" run right after the anchor.
-        // Newly inserted tracks stack up after the anchor in arrival order so
-        // that A, B, C added while X plays become [X, A, B, C, ...].
-        const following = await tx.track.findMany({
-          where: { roomId: room.id, position: { gt: anchor.position } },
-          orderBy: { position: "asc" },
-        });
-        let insertPos = anchor.position + 1;
-        for (const t of following) {
-          if (t.status === "QUEUED") {
-            insertPos = t.position + 1;
-          } else {
-            break;
-          }
-        }
-        await tx.track.updateMany({
-          where: { roomId: room.id, position: { gte: insertPos } },
-          data: { position: { increment: 1 } },
-        });
-        return tx.track.create({
-          data: {
-            roomId: room.id,
-            url: meta.url,
-            platform: meta.platform,
-            externalId: meta.externalId,
-            title: meta.title,
-            thumbnail: meta.thumbnail,
-            durationSec: meta.durationSec,
-            position: insertPos,
-          },
-        });
-      }
-    }
-
     const last = await tx.track.findFirst({
       where: { roomId: room.id },
       orderBy: { position: "desc" },

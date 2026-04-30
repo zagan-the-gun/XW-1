@@ -123,9 +123,10 @@ Socket は全ルームで常時接続。
 
 曲追加時は：
 
-1. ローカル state に楽観的に挿入（ループ中は `currentIndex + QUEUED連続` の末尾直後に）
-2. `emit("track_added")` で他クライアントに通知
-3. `refreshTracks()` で DB の正本を再取得し、全員の position を完全一致させる
+1. ローカル state に楽観的に末尾追加（ループ ON / OFF 問わず常に末尾。割り込みは無し）
+2. 現在キューがアイドル（`currentIndex < 0`）なら、追加した曲を即再生開始する（`emit("play")`）
+3. `emit("track_added")` で他クライアントに通知
+4. `refreshTracks()` で DB の正本を再取得し、全員の position を完全一致させる
 
 この「楽観更新→再取得」パターンで、UI 応答性と整合性を両立している。
 

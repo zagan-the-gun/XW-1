@@ -217,33 +217,16 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     [room.slug],
   );
 
-  // Adding a track inserts it right after the current track (and any
-  // already-inserted newcomers) when loop mode is on, so it jumps ahead of the
-  // rest of the base cycle. The server-side POST handler does the position
-  // shifting; we only tell it which track to anchor against.
+  // Tracks always append to the end of the queue. Auto-start playback only
+  // when the room is currently idle (no current track).
   const handleAdded = useCallback(
     (track: Track) => {
-      setTracks((prev) => {
-        if (loopPlayback && currentIndex >= 0) {
-          const anchor = prev[currentIndex];
-          let insertAt = currentIndex + 1;
-          for (let i = currentIndex + 1; i < prev.length; i++) {
-            if (prev[i].status === "QUEUED" && prev[i].position > anchor.position) {
-              insertAt = i + 1;
-            } else {
-              break;
-            }
-          }
-          return [...prev.slice(0, insertAt), track, ...prev.slice(insertAt)];
-        }
-        return [...prev, track];
-      });
+      setTracks((prev) => [...prev, track]);
 
       setCurrentIndex((prev) => {
         if (prev >= 0) return prev;
-        return latestRef.current.tracks.findIndex((t) => t.status === "QUEUED") >= 0
-          ? latestRef.current.tracks.findIndex((t) => t.status === "QUEUED")
-          : 0;
+        const idx = latestRef.current.tracks.findIndex((t) => t.status === "QUEUED");
+        return idx >= 0 ? idx : 0;
       });
 
       emit("track_added", { trackId: track.id });
@@ -254,7 +237,7 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
 
       refreshTracks();
     },
-    [loopPlayback, currentIndex, emit, refreshTracks],
+    [emit, refreshTracks],
   );
 
   const handleRemove = useCallback(
@@ -546,11 +529,7 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
           <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">
             曲を追加
           </h2>
-          <AddTrackForm
-            roomSlug={room.slug}
-            insertAfterTrackId={loopPlayback && currentTrack ? currentTrack.id : undefined}
-            onAdded={handleAdded}
-          />
+          <AddTrackForm roomSlug={room.slug} onAdded={handleAdded} />
         </Card>
       </div>
 
