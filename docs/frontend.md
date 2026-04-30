@@ -51,7 +51,7 @@ src/components/
 
 | state | 型 | 役割 |
 |---|---|---|
-| `room` | `Room` | ルーム設定（`loopPlayback` 等の更新がここに集約） |
+| `room` | `Room` | ルーム設定（`loopPlayback` / `shufflePlayback` 等の更新がここに集約） |
 | `tracks` | `Track[]` | キュー。position 昇順で保持 |
 | `currentIndex` | `number` | 現在再生中のインデックス（`-1` はアイドル状態） |
 | `isPlaying` | `boolean` | 再生中フラグ。listening=false の端末では iframe が無いので "ルームの状態を反映するだけ" |
@@ -71,7 +71,7 @@ src/components/
 
 ### 最新 state を effect から参照する `latestRef`
 
-再レンダリングのたびに Socket リスナーを再登録するのを避けるため、`latestRef.current = { tracks, currentIndex, loopPlayback, isPlaying, listening }` を毎レンダで更新。Socket ハンドラ内では `latestRef.current` を見ることで最新値を参照する。
+再レンダリングのたびに Socket リスナーを再登録するのを避けるため、`latestRef.current = { tracks, currentIndex, loopPlayback, shufflePlayback, isPlaying, listening }` を毎レンダで更新。Socket ハンドラ内では `latestRef.current` を見ることで最新値を参照する。
 
 同様に `handleEndedRef` で最新の `handleEnded` を保持している（循環依存を避けつつ常に新しい関数を呼ぶため）。`pendingStateQueryRef` は「同期 OFF→ON 直後の `state_reply` 待ち中か」を保持し、最初の reply を採用したら即クリアする。
 
@@ -108,7 +108,7 @@ Socket は全ルームで常時接続。
 - `play` → `currentIndex` と `isPlaying` を更新（listening=false でも UI を反映するため受け取る）
 - `pause` → `isPlaying=false`
 - `skip` → `handleEnded()` を呼び出し（誰が押しても全員進む）
-- `settings_changed` → `room.loopPlayback` を更新
+- `settings_changed` → `room.loopPlayback` / `room.shufflePlayback` を受け取った分だけ更新（独立フラグなので boolean プロパティが省略されたものは触らない）
 - `passcode_changed` → 他の参加者がパスコードを追加/再生成/削除した通知。**自動追従**（案A）のため、受信側は自分の Cookie を更新する (`POST /api/rooms/[slug]/auth` で新パスコードをセット、または `DELETE` で削除) → `passcode` state を差し替え → トースト表示。これにより既存メンバーは締め出されずに継続操作できる
 - `state_query` → 自分が `listening=true` && `isPlaying=true` で曲があるとき、`playerRef.current.getCurrentTime()` を `state_reply` で返す
 - `state_reply` → `pendingStateQueryRef.current` が立っているときだけ採用、`setCurrentIndex` + 500ms 後に `seekTo`（iframe mount 待ち）。**最初の 1 件で `pendingStateQueryRef` をクリア**して以降は無視（race-based）
@@ -118,6 +118,18 @@ Socket は全ルームで常時接続。
 各端末は独立に再生していくため、CM やバッファリングで進度がズレる。これを毎曲の頭でリセットするため、`handleEnded` は次曲の `play { trackId, positionSec: 0 }` を emit する。
 
 副作用：CM 等で遅れている端末はその曲のラスト数秒〜数十秒を聴き逃す。これは仕様として許容（位置同期で飛び飛びになるよりマシ）。
+
+### シャッフル再生の分岐ルール
+
+`Room.shufflePlayback` が `true` のときだけ、次曲決定が「`currentIndex` 以降の最初の `QUEUED`」から「`QUEUED` 集合からランダム1つ」（`pickRandomQueued`）に差し替わる。実装は `src/lib/queue.ts` と `RoomClient` 側の数か所だけ。
+
+- `handleEnded`: PLAYED 化後の `updatedTracks` に対して `pickRandomQueued`。ループON 全消化時の `/tracks/reset` 後は `pickRandomQueued(reset, { excludeId: finishedTrack.id })` で「直前まで流れていた曲」を候補から外す（候補0件なら除外を無視するセーフティあり）。
+- `handleAdded`: アイドル復帰時 (`currentIndex < 0`) の自動再生で、追加曲を含む QUEUED 集合からランダム選曲。シャッフルOFF 時は従来どおり `pickIndexAfterAdd`（QUEUED があればそれ、なければ追加した末尾）。
+- `handleSelect`: クリックした曲だけ即再生し、他の status は触らない（`/tracks/[id]/select` API は呼ばない）。順番再生の前提が無いので「前は PLAYED・以降は QUEUED」リセットを skip する。
+- `hasNext`: `tracks.some(t => t.status === "QUEUED" || t.status === "PLAYING") || (loopPlayback && tracks.length > 0)` で判定。
+- `handleToggleLoop` の reset 後の最初の選曲も、シャッフルON ならランダム。
+
+シャッフルOFF/ON 切替自体は副作用なし（次の `handleEnded` から効くだけ）で、`handleToggleShuffle` は PATCH 失敗時にロールバックする以外は単純なトグル。
 
 ### 楽観的更新 + 再取得
 
@@ -132,7 +144,7 @@ Socket は全ルームで常時接続。
 
 ### キュー上の曲をクリックしたとき
 
-`QueueList` 上の曲をクリックすると `handleSelect(idx)` が走る。挙動：
+`QueueList` 上の曲をクリックすると `handleSelect(idx)` が走る。シャッフルOFF 時の挙動：
 
 1. 楽観的に `tracks` の `status` を書き換える（`idx` 未満で `QUEUED` だったものを `PLAYED` に、`idx` 以降の `PLAYED/SKIPPED` を `QUEUED` に）
 2. `currentIndex = idx` / `isPlaying = true`
@@ -140,6 +152,8 @@ Socket は全ルームで常時接続。
 4. `POST /tracks/[trackId]/select` を叩いて DB 上の正本を一括書き換え。成功したら `emit("queue_changed")` で他端末に refetch を促す
 
 これにより、クリック以前は再生済みとして淡色表示され、以降は未再生として並ぶ「再生履歴の整合」が取れる。
+
+シャッフルON 時は順番再生の前提が無いため、上記 1 と 4 を skip する（`/select` API は呼ばず、他のトラック status にも触らない）。`currentIndex = idx` と `emit("play")` だけが走り、次曲は `handleEnded` から `pickRandomQueued` で改めてランダム選曲される。
 
 ## 4. `JukeboxPlayer` の再生制御
 
@@ -301,7 +315,7 @@ export function getSocket(): Socket {
 
 - **Tailwind CSS** + カスタム CSS 変数（`globals.css` のテーマトークン: `--primary`, `--border`, `--muted-foreground` など）
 - ユーティリティ合成は `cn()` (`src/lib/utils.ts` → `clsx` + `tailwind-merge`) を使う
-- アイコンは **lucide-react**（`Play`, `Pause`, `SkipForward`, `Disc3`, `Repeat`, `Users`, `Wifi`/`WifiOff`, `Share2` 等）
+- アイコンは **lucide-react**（`Play`, `Pause`, `SkipForward`, `Disc3`, `Repeat`, `Shuffle`, `Users`, `Wifi`/`WifiOff`, `Share2` 等）
 - ダークテーマ前提。`bg-gradient-hero` の背景を `<body>` に敷いている
 
 ## 9. 画像ドメインの登録

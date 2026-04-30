@@ -79,6 +79,7 @@ erDiagram
     Room {
         string slug UK
         bool loopPlayback
+        bool shufflePlayback
         string passcode "nullable, 6桁英数字"
         datetime lastOccupiedAt "空室TTLの基準"
     }
@@ -181,16 +182,20 @@ stateDiagram-v2
 
 ## 5. モードとスイッチ
 
-ルーム単位の設定はループのみ。それ以外の「同期再生」は per-user / per-device の localStorage 切替。
+ルーム単位の設定はループとシャッフル。「同期再生」は per-user / per-device の localStorage 切替。
 
 | 設定 | 永続化先 | 値 | 説明 |
 |---|---|---|---|
 | `Room.loopPlayback` | DB（ルーム単位） | `true` | キュー全消化後、全 `PLAYED/SKIPPED` を `QUEUED` に戻して繰り返し |
 | | | `false` | キュー消化で停止 |
+| `Room.shufflePlayback` | DB（ルーム単位） | `true` | 次曲決定を「`QUEUED` 集合からランダム1つ」に切り替え。ループ ON と組み合わせると、全消化 → reset → またランダムで一巡保証ループ。reset 直後の1曲目は「直前まで流れていた曲」を候補から除外して連続再生を回避（候補が0件になる場合は除外しない） |
+| | | `false` | 上から順番に再生 |
 | `Room.passcode` | DB（ルーム単位、平文保存） | 6桁英数字 | 鍵付きルーム。SSR/REST/Socket.io で `xw_passcode_<slug>` Cookie と等値比較して入室可否を判定 |
 | | | `null` | 鍵なし。誰でも入室可 |
 | `listening` | `localStorage:jukebox:listening:<slug>`（端末＋ルーム単位） | `true` | この端末で iframe を mount し、音を鳴らす（"スピーカー"） |
 | | | `false` | iframe を mount しない。キュー・曲名・コントロールバーのみ表示する"リモコン" |
+
+`loopPlayback` と `shufflePlayback` は **独立した直交フラグ**で、4 通りすべての組み合わせが許される（OFF/OFF・OFF/ON・ON/OFF・ON/ON）。
 
 ### 同期の挙動メモ
 

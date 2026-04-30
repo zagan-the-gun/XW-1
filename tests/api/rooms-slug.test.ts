@@ -14,6 +14,7 @@ type RoomRes = {
   hasPasscode: boolean;
   passcode: string | null;
   loopPlayback: boolean;
+  shufflePlayback: boolean;
 };
 
 beforeAll(async () => {
@@ -133,6 +134,49 @@ describe("PATCH /api/rooms/[slug]", () => {
       paramsOf({ slug: "locked-001" }),
     );
     expect(res.status).toBe(200);
+  });
+
+  it("鍵なしルームの shufflePlayback は誰でも更新できる", async () => {
+    await seedOpen();
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/rooms/open-001", {
+        method: "PATCH",
+        body: { shufflePlayback: true },
+      }),
+      paramsOf({ slug: "open-001" }),
+    );
+    expect(res.status).toBe(200);
+    const data = await readJson<{ room: RoomRes }>(res);
+    expect(data.room.shufflePlayback).toBe(true);
+    const persisted = await prisma.room.findUnique({ where: { slug: "open-001" } });
+    expect(persisted?.shufflePlayback).toBe(true);
+  });
+
+  it("loopPlayback と shufflePlayback は独立フラグとして同時に更新できる", async () => {
+    await seedOpen();
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/rooms/open-001", {
+        method: "PATCH",
+        body: { loopPlayback: true, shufflePlayback: true },
+      }),
+      paramsOf({ slug: "open-001" }),
+    );
+    expect(res.status).toBe(200);
+    const data = await readJson<{ room: RoomRes }>(res);
+    expect(data.room.loopPlayback).toBe(true);
+    expect(data.room.shufflePlayback).toBe(true);
+  });
+
+  it("鍵ありルームの shufflePlayback 更新は Cookie 必須", async () => {
+    await seedLocked("A1B2C3");
+    const res = await PATCH(
+      jsonRequest("http://localhost/api/rooms/locked-001", {
+        method: "PATCH",
+        body: { shufflePlayback: true },
+      }),
+      paramsOf({ slug: "locked-001" }),
+    );
+    expect(res.status).toBe(401);
   });
 
   it("鍵なしルームに passcode:regenerate は誰でも実行でき新パスコードと Set-Cookie が返る", async () => {

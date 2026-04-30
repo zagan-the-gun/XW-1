@@ -114,8 +114,16 @@ export function registerSocketHandlers(io: SocketIOServer) {
 
     socket.on(
       "settings_changed",
-      ({ roomSlug, loopPlayback }: { roomSlug: string; loopPlayback?: boolean }) => {
-        socket.to(roomSlug).emit("settings_changed", { loopPlayback });
+      ({
+        roomSlug,
+        loopPlayback,
+        shufflePlayback,
+      }: {
+        roomSlug: string;
+        loopPlayback?: boolean;
+        shufflePlayback?: boolean;
+      }) => {
+        socket.to(roomSlug).emit("settings_changed", { loopPlayback, shufflePlayback });
       },
     );
 

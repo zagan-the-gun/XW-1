@@ -9,12 +9,14 @@ import {
   Lock,
   Repeat,
   Share2,
+  Shuffle,
   Unlock,
   Users,
   Wifi,
   WifiOff,
 } from "lucide-react";
 import { getSocket } from "@/lib/socket";
+import { findNextQueued, pickIndexAfterAdd, pickRandomQueued } from "@/lib/queue";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Toaster, useToaster } from "@/components/ui/Toast";
@@ -68,14 +70,29 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
   }, [room.slug]);
 
   const loopPlayback = room.loopPlayback;
+  const shufflePlayback = room.shufflePlayback;
   const currentTrack = currentIndex >= 0 ? tracks[currentIndex] : undefined;
   const playerRef = useRef<JukeboxPlayerHandle | null>(null);
 
   // Keep the latest snapshot accessible from callbacks without retriggering effects.
-  const latestRef = useRef({ tracks, currentIndex, loopPlayback, isPlaying, listening });
+  const latestRef = useRef({
+    tracks,
+    currentIndex,
+    loopPlayback,
+    shufflePlayback,
+    isPlaying,
+    listening,
+  });
   useEffect(() => {
-    latestRef.current = { tracks, currentIndex, loopPlayback, isPlaying, listening };
-  }, [tracks, currentIndex, loopPlayback, isPlaying, listening]);
+    latestRef.current = {
+      tracks,
+      currentIndex,
+      loopPlayback,
+      shufflePlayback,
+      isPlaying,
+      listening,
+    };
+  }, [tracks, currentIndex, loopPlayback, shufflePlayback, isPlaying, listening]);
 
   const refreshTracks = useCallback(async () => {
     const res = await fetch(`/api/rooms/${room.slug}/tracks`);
@@ -124,9 +141,18 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
     };
     const onPause = () => setIsPlaying(false);
     const onSkip = () => handleEndedRef.current?.();
-    const onSettingsChanged = ({ loopPlayback }: { loopPlayback?: boolean }) => {
+    const onSettingsChanged = ({
+      loopPlayback,
+      shufflePlayback,
+    }: {
+      loopPlayback?: boolean;
+      shufflePlayback?: boolean;
+    }) => {
       if (typeof loopPlayback === "boolean") {
         setRoom((prev) => ({ ...prev, loopPlayback }));
+      }
+      if (typeof shufflePlayback === "boolean") {
+        setRoom((prev) => ({ ...prev, shufflePlayback }));
       }
     };
 
@@ -219,20 +245,32 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
 
   // Tracks always append to the end of the queue. Auto-start playback only
   // when the room is currently idle (no current track).
+  // シャッフルON でアイドル復帰する場合は、追加曲を含む QUEUED 集合から
+  // ランダムに 1 つ引くので「追加した曲そのもの」が再生されるとは限らない。
   const handleAdded = useCallback(
     (track: Track) => {
-      setTracks((prev) => [...prev, track]);
+      const snap = latestRef.current;
+      const wasIdle = snap.currentIndex < 0;
+      const newTracks = [...snap.tracks, track];
 
-      setCurrentIndex((prev) => {
-        if (prev >= 0) return prev;
-        const idx = latestRef.current.tracks.findIndex((t) => t.status === "QUEUED");
-        return idx >= 0 ? idx : 0;
-      });
+      setTracks(newTracks);
+
+      let nextIdx: number;
+      if (!wasIdle) {
+        nextIdx = snap.currentIndex;
+      } else if (snap.shufflePlayback) {
+        const picked = pickRandomQueued(newTracks);
+        nextIdx = picked >= 0 ? picked : newTracks.length - 1;
+      } else {
+        nextIdx = pickIndexAfterAdd(snap.currentIndex, snap.tracks);
+      }
+      setCurrentIndex(nextIdx);
 
       emit("track_added", { trackId: track.id });
-      if (latestRef.current.currentIndex < 0) {
+      if (wasIdle) {
+        const startTrack = newTracks[nextIdx] ?? track;
         setIsPlaying(true);
-        emit("play", { trackId: track.id, positionSec: 0 });
+        emit("play", { trackId: startTrack.id, positionSec: 0 });
       }
 
       refreshTracks();
@@ -255,10 +293,21 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
   // Clicking a queue row jumps to that track. Everything before it is marked
   // PLAYED and the target + everything after is reset to QUEUED, so the
   // natural advance after this track resumes from "the next one in the list".
+  //
+  // シャッフル時は順番再生の前提が無いので、クリックした曲を即再生するだけで
+  // 他のトラック status には触れない（/select API も呼ばない）。次曲は
+  // handleEnded で QUEUED 集合からランダム選択される。
   const handleSelect = useCallback(
     (idx: number) => {
       const target = tracks[idx];
       if (!target) return;
+
+      if (latestRef.current.shufflePlayback) {
+        setCurrentIndex(idx);
+        setIsPlaying(true);
+        emit("play", { trackId: target.id, positionSec: 0 });
+        return;
+      }
 
       setTracks((prev) =>
         prev.map((t, i) => {
@@ -310,7 +359,9 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
       body: JSON.stringify({ status: "PLAYED" }),
     }).catch(() => {});
 
-    const nextIdx = findNextQueued(updatedTracks, snap.currentIndex);
+    const nextIdx = snap.shufflePlayback
+      ? pickRandomQueued(updatedTracks)
+      : findNextQueued(updatedTracks, snap.currentIndex);
     if (nextIdx >= 0) {
       const nextTrack = updatedTracks[nextIdx];
       setCurrentIndex(nextIdx);
@@ -331,9 +382,15 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
           const reset = data.tracks as Track[];
           setTracks(reset);
           if (reset.length > 0) {
-            setCurrentIndex(0);
+            // シャッフル時は reset 直後に「直前まで流れていた曲」が
+            // また 1 曲目に来るのを避けるため excludeId を渡す。
+            const startIdx = snap.shufflePlayback
+              ? pickRandomQueued(reset, { excludeId: finishedTrack.id })
+              : 0;
+            const safeIdx = startIdx >= 0 ? startIdx : 0;
+            setCurrentIndex(safeIdx);
             setIsPlaying(true);
-            emit("play", { trackId: reset[0].id, positionSec: 0 });
+            emit("play", { trackId: reset[safeIdx].id, positionSec: 0 });
           } else {
             setCurrentIndex(-1);
             setIsPlaying(false);
@@ -382,12 +439,31 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
       const { tracks: reset } = (await res.json()) as { tracks: Track[] };
       setTracks(reset);
       if (reset.length > 0) {
-        setCurrentIndex(0);
+        const startIdx = snap.shufflePlayback ? pickRandomQueued(reset) : 0;
+        const safeIdx = startIdx >= 0 ? startIdx : 0;
+        setCurrentIndex(safeIdx);
         setIsPlaying(true);
-        emit("play", { trackId: reset[0].id, positionSec: 0 });
+        emit("play", { trackId: reset[safeIdx].id, positionSec: 0 });
       }
     }
   }, [loopPlayback, room.slug, emit]);
+
+  const handleToggleShuffle = useCallback(async () => {
+    const next = !shufflePlayback;
+    setRoom((prev) => ({ ...prev, shufflePlayback: next }));
+    emit("settings_changed", { shufflePlayback: next });
+
+    try {
+      await fetch(`/api/rooms/${room.slug}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ shufflePlayback: next }),
+      });
+    } catch {
+      setRoom((prev) => ({ ...prev, shufflePlayback: !next }));
+      emit("settings_changed", { shufflePlayback: !next });
+    }
+  }, [shufflePlayback, room.slug, emit]);
 
   const handleToggleListening = useCallback(() => {
     setListening((prev) => {
@@ -520,6 +596,23 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={handleToggleShuffle}
+                aria-pressed={shufflePlayback}
+                title={
+                  shufflePlayback
+                    ? "シャッフル再生オン（未再生からランダム）"
+                    : "シャッフル再生オフ（上から順番再生）"
+                }
+                className={
+                  shufflePlayback ? "!border-primary/70 !text-primary !bg-primary/10" : ""
+                }
+              >
+                <Shuffle className="h-4 w-4" />
+                シャッフル
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setPasscodeOpen(true)}
                 aria-pressed={Boolean(passcode)}
                 title={passcode ? "パスコードを管理（鍵あり）" : "パスコードを管理（鍵なし）"}
@@ -546,7 +639,13 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
             onEnded={handleEnded}
             onTogglePlay={handleTogglePlay}
             onSkip={handleSkip}
-            hasNext={findNextQueued(tracks, currentIndex) >= 0 || (loopPlayback && tracks.length > 0)}
+            hasNext={
+              shufflePlayback
+                ? tracks.some((t) => t.status === "QUEUED" || t.status === "PLAYING") ||
+                  (loopPlayback && tracks.length > 0)
+                : findNextQueued(tracks, currentIndex) >= 0 ||
+                  (loopPlayback && tracks.length > 0)
+            }
           />
         </Card>
 
@@ -598,11 +697,4 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
       <Toaster toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
-}
-
-function findNextQueued(tracks: Track[], currentIndex: number) {
-  for (let i = currentIndex + 1; i < tracks.length; i++) {
-    if (tracks[i].status === "QUEUED" || tracks[i].status === "PLAYING") return i;
-  }
-  return -1;
 }

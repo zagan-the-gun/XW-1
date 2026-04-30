@@ -11,6 +11,7 @@ import {
 
 const PatchRoomSchema = z.object({
   loopPlayback: z.boolean().optional(),
+  shufflePlayback: z.boolean().optional(),
   name: z.string().min(1).max(80).optional(),
   // "regenerate" で新規生成または再生成、null で鍵を外す。省略時は変更しない。
   passcode: z.union([z.literal("regenerate"), z.null()]).optional(),
@@ -78,6 +79,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
     where: { id: room.id },
     data: {
       ...(parsed.data.loopPlayback !== undefined && { loopPlayback: parsed.data.loopPlayback }),
+      ...(parsed.data.shufflePlayback !== undefined && {
+        shufflePlayback: parsed.data.shufflePlayback,
+      }),
       ...(parsed.data.name !== undefined && { name: parsed.data.name }),
       ...(nextPasscode !== undefined && { passcode: nextPasscode }),
     },
