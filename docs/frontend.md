@@ -57,7 +57,7 @@ src/components/
 | `isPlaying` | `boolean` | 再生中フラグ。listening=false の端末では iframe が無いので "ルームの状態を反映するだけ" |
 | `participants` | `Participant[]` | 参加者一覧（Socket は常時接続） |
 | `connected` | `boolean` | Socket接続状態 |
-| `listening` | `boolean` | **per-user / per-device の同期トグル**。`localStorage:jukebox:listening:<slug>` で永続化、デフォルト OFF |
+| `listening` | `boolean` | **per-user / per-device の「聴く」トグル**。`localStorage:jukebox:listening:<slug>` で永続化、デフォルト OFF |
 | `userName` | `string` | `localStorage` に保存される `guest-xxxx` |
 
 ### `listening` の意味
@@ -67,13 +67,13 @@ src/components/
 - `listening=true` ＝ "スピーカー": iframe を mount して鳴らす
 - `listening=false` ＝ "リモコン": iframe は mount しない、ヘッダーやコントロールバーは表示され、再生・スキップ・キュー操作は他の listener にブロードキャストされる
 
-各操作者がそれぞれ `localStorage` で独立に切り替えるので、A の同期トグルは B の状態に影響しない。
+各操作者がそれぞれ `localStorage` で独立に切り替えるので、A の「聴く」トグルは B の状態に影響しない。
 
 ### 最新 state を effect から参照する `latestRef`
 
 再レンダリングのたびに Socket リスナーを再登録するのを避けるため、`latestRef.current = { tracks, currentIndex, loopPlayback, shufflePlayback, isPlaying, listening }` を毎レンダで更新。Socket ハンドラ内では `latestRef.current` を見ることで最新値を参照する。
 
-同様に `handleEndedRef` で最新の `handleEnded` を保持している（循環依存を避けつつ常に新しい関数を呼ぶため）。`pendingStateQueryRef` は「同期 OFF→ON 直後の `state_reply` 待ち中か」を保持し、最初の reply を採用したら即クリアする。
+同様に `handleEndedRef` で最新の `handleEnded` を保持している（循環依存を避けつつ常に新しい関数を呼ぶため）。`pendingStateQueryRef` は「『聴く』を OFF→ON にした直後の `state_reply` 待ち中か」を保持し、最初の reply を採用したら即クリアする。
 
 ### イベントと状態遷移
 
@@ -93,7 +93,7 @@ flowchart LR
     toggleLoop[ループON/OFF] --> patchRoom[PATCH /rooms]
     patchRoom --> emitSettings[emit settings_changed]
 
-    toggleListen[同期トグル] -->|OFF→ON| qry[emit state_query]
+    toggleListen[「聴く」トグル] -->|OFF→ON| qry[emit state_query]
     qry -->|reply 受信| seek[setCurrentIndex+seekTo]
     qry -->|1秒待っても無音| fallback[先頭QUEUEDを0秒から]
     toggleListen -->|ON→OFF| stopLocal[setIsPlaying=false<br/>broadcast しない]

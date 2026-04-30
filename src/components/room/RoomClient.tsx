@@ -566,8 +566,8 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
                 aria-pressed={listening}
                 title={
                   listening
-                    ? "同期オン（この端末でも曲を流す）"
-                    : "同期オフ（他の参加者の端末でのみ再生）"
+                    ? "聴く ON（この端末で音を鳴らす）"
+                    : "聴く OFF（他の参加者の端末でのみ再生／リモコンとして操作）"
                 }
                 className={listening ? "!border-primary/70 !text-primary !bg-primary/10" : ""}
               >
@@ -576,7 +576,7 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
                 ) : (
                   <HeadphoneOff className="h-4 w-4" />
                 )}
-                同期
+                聴く
               </Button>
               <Button
                 variant="outline"

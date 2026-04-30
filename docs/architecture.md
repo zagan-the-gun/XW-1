@@ -112,17 +112,17 @@ sequenceDiagram
     E-->>A: title / thumbnail / duration
     A->>D: track 作成 (position末尾)
     A-->>B: { track }
-    B->>B: state に追加 → 同期ON なら JukeboxPlayer 再生
+    B->>B: state に追加 → 聴く ON なら JukeboxPlayer 再生
     Note over B: PLAYED になったら PATCH /tracks/{id}
 ```
 
-### 4.2 複数人で曲を追加・再生（同期 ON / OFF 混在）
+### 4.2 複数人で曲を追加・再生（聴く ON / OFF 混在）
 
 ```mermaid
 sequenceDiagram
-    participant A as A (同期ON: スピーカー)
-    participant B as B (同期OFF: リモコン)
-    participant C as C (後から同期ON)
+    participant A as A (聴くON: スピーカー)
+    participant B as B (聴くOFF: リモコン)
+    participant C as C (後から聴くON)
     participant S as Socket.io
     participant API as REST API
     participant D as DB
@@ -143,7 +143,7 @@ sequenceDiagram
     A->>A: handleEnded → 次の曲
 
     C->>S: join_room
-    C->>S: emit state_query (同期ON切替)
+    C->>S: emit state_query (聴く ON 切替)
     S-->>A: state_query
     A->>S: emit state_reply { trackId, positionSec }
     S-->>C: state_reply
@@ -182,7 +182,7 @@ stateDiagram-v2
 
 ## 5. モードとスイッチ
 
-ルーム単位の設定はループとシャッフル。「同期再生」は per-user / per-device の localStorage 切替。
+ルーム単位の設定はループとシャッフル。「聴く（音声出力するか）」は per-user / per-device の localStorage 切替。
 
 | 設定 | 永続化先 | 値 | 説明 |
 |---|---|---|---|
@@ -197,10 +197,10 @@ stateDiagram-v2
 
 `loopPlayback` と `shufflePlayback` は **独立した直交フラグ**で、4 通りすべての組み合わせが許される（OFF/OFF・OFF/ON・ON/OFF・ON/ON）。
 
-### 同期の挙動メモ
+### 「聴く」トグルと位置同期の挙動メモ
 
 - 位置の永続的な同期はしない（CM・バッファリング等で破綻するため）
-- **新規 listener が同期ON にした瞬間だけ** `state_query` をブロードキャストして、最初に返ってきた peer の位置に `seekTo` する（race-based）
+- **新規 listener が「聴く」を ON にした瞬間だけ** `state_query` をブロードキャストして、最初に返ってきた peer の位置に `seekTo` する（race-based）
 - 2 曲目以降は `handleEnded` が `play` を emit するので、**先頭だけ全員揃う**（曲尻はずれる前提）
 
 ## 6. 開発フェーズ
@@ -209,7 +209,7 @@ stateDiagram-v2
 |---|---|---|
 | 1 | 基盤（URL追加、順次再生） | 実装済 |
 | 2 | リアルタイム共有（Socket.io、キュー同期） | 実装済 |
-| 3 | per-user 同期トグル（リモコン / スピーカーの分離・初回位置同期） | 実装済 |
+| 3 | per-user 「聴く」トグル（リモコン / スピーカーの分離・初回位置同期） | 実装済 |
 | 4 | 認証・投票・チャット・Capacitor によるアプリ化 | 未着手 |
 
 現時点の制約：
