@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { generateRoomPasscode } from "@/lib/passcode";
+import { buildClearPasscodeCookie, buildSetPasscodeCookie } from "@/lib/room-auth";
 import {
-  buildClearPasscodeCookie,
-  buildSetPasscodeCookie,
-  passcodeCookieName,
-} from "@/lib/room-auth";
+  forbiddenResponse,
+  isSameOriginRequest,
+  readPasscodeCookie,
+  unauthorizedResponse,
+} from "@/lib/room-auth-server";
 
 const PatchRoomSchema = z.object({
   loopPlayback: z.boolean().optional(),
@@ -16,11 +17,6 @@ const PatchRoomSchema = z.object({
   // "regenerate" で新規生成または再生成、null で鍵を外す。省略時は変更しない。
   passcode: z.union([z.literal("regenerate"), z.null()]).optional(),
 });
-
-async function readPasscodeCookie(slug: string) {
-  const store = await cookies();
-  return store.get(passcodeCookieName(slug))?.value;
-}
 
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -49,6 +45,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+  if (!isSameOriginRequest(req)) return forbiddenResponse();
   const { slug } = await params;
   const body = await req.json().catch(() => null);
   const parsed = PatchRoomSchema.safeParse(body);
@@ -65,7 +62,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
 
   // 鍵ありルームの操作は Cookie 認証必須。鍵なしルームへの初回設定だけは誰でも可。
   if (room.passcode && !isRoomMember) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return unauthorizedResponse();
   }
 
   let nextPasscode: string | null | undefined = undefined;
@@ -98,7 +95,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ slug: 
   return res;
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+  if (!isSameOriginRequest(req)) return forbiddenResponse();
   const { slug } = await params;
   const room = await prisma.room.findUnique({ where: { slug } });
   if (!room) {
@@ -108,7 +106,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ slug
   if (room.passcode) {
     const cookieValue = await readPasscodeCookie(slug);
     if (cookieValue !== room.passcode) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return unauthorizedResponse();
     }
   }
 

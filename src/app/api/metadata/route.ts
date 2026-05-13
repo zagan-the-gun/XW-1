@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { fetchMetadata } from "@/lib/metadata";
+import { forbiddenResponse, isSameOriginRequest } from "@/lib/room-auth-server";
 
 export async function POST(req: Request) {
+  if (!isSameOriginRequest(req)) return forbiddenResponse();
   const body = await req.json().catch(() => null);
   const url = body?.url;
   if (typeof url !== "string") {

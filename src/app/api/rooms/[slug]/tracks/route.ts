@@ -3,6 +3,12 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { fetchMetadata } from "@/lib/metadata";
 import { MAX_TRACKS_PER_ROOM } from "@/lib/constants";
+import {
+  forbiddenResponse,
+  isAuthorizedForRoom,
+  isSameOriginRequest,
+  unauthorizedResponse,
+} from "@/lib/room-auth-server";
 
 const AddTrackSchema = z.object({
   url: z.string().url(),
@@ -12,6 +18,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
   const { slug } = await params;
   const room = await prisma.room.findUnique({ where: { slug } });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
+  if (!(await isAuthorizedForRoom(slug, room.passcode))) return unauthorizedResponse();
 
   const tracks = await prisma.track.findMany({
     where: { roomId: room.id },
@@ -21,6 +28,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ slug: string }> }) {
+  if (!isSameOriginRequest(req)) return forbiddenResponse();
   const { slug } = await params;
   const body = await req.json().catch(() => null);
   const parsed = AddTrackSchema.safeParse(body);
@@ -30,6 +38,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ slug: s
 
   const room = await prisma.room.findUnique({ where: { slug } });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
+  if (!(await isAuthorizedForRoom(slug, room.passcode))) return unauthorizedResponse();
 
   // Cap total tracks (including PLAYED/SKIPPED) before touching the external
   // oEmbed APIs so the limit also protects us from metadata-fetch abuse.

@@ -515,7 +515,9 @@ export function RoomClient({ initialRoom }: { initialRoom: RoomWithTracks }) {
   const handlePasscodeLocalChange = useCallback(
     (next: string | null) => {
       setPasscode(next);
-      getSocket().emit("passcode_changed", { roomSlug: room.slug, passcode: next });
+      // payload は信用されない（サーバが DB から現値を読んで中継する）。
+      // 「変更があった」ことを通知するためだけの emit。
+      getSocket().emit("passcode_changed", { roomSlug: room.slug });
       pushToast(
         next
           ? {

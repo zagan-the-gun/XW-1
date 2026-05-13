@@ -18,8 +18,17 @@ async function main() {
     handle(req, res);
   });
 
+  // 本番では `ALLOWED_ORIGINS` で接続元オリジンを限定する。
+  // 未設定（開発時など）は同一オリジン前提で全許可。`credentials: true` は
+  // handshake で `xw_passcode_*` Cookie を送るために必要。
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
   const io = new SocketIOServer(httpServer, {
-    cors: { origin: "*" },
+    cors: {
+      origin: allowedOrigins && allowedOrigins.length > 0 ? allowedOrigins : true,
+      credentials: true,
+    },
     path: "/api/socketio",
   });
 

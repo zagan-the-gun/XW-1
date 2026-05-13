@@ -34,20 +34,32 @@ const nextConfig: NextConfig = {
       '"https://www.youtube-nocookie.com"',
       '"https://player.vimeo.com"',
     ];
+    // HSTS は HTTPS で運用する本番のみ。dev (http://localhost) で付けると
+    // ブラウザが HTTPS にリダイレクトしようとして開発が止まるので外す。
+    const isProd = process.env.NODE_ENV === "production";
+    const securityHeaders = [
+      {
+        key: "Permissions-Policy",
+        value: [
+          `autoplay=(self ${autoplayOrigins.join(" ")})`,
+          `encrypted-media=(self ${encryptedMediaOrigins.join(" ")})`,
+          `fullscreen=(self ${fullscreenOrigins.join(" ")})`,
+          "picture-in-picture=(self)",
+        ].join(", "),
+      },
+      ...(isProd
+        ? [
+            {
+              key: "Strict-Transport-Security",
+              value: "max-age=63072000; includeSubDomains",
+            },
+          ]
+        : []),
+    ];
     return [
       {
         source: "/:path*",
-        headers: [
-          {
-            key: "Permissions-Policy",
-            value: [
-              `autoplay=(self ${autoplayOrigins.join(" ")})`,
-              `encrypted-media=(self ${encryptedMediaOrigins.join(" ")})`,
-              `fullscreen=(self ${fullscreenOrigins.join(" ")})`,
-              "picture-in-picture=(self)",
-            ].join(", "),
-          },
-        ],
+        headers: securityHeaders,
       },
     ];
   },

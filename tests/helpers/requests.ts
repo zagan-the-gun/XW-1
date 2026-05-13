@@ -2,14 +2,41 @@
 
 export function jsonRequest(
   url: string,
-  init: { method?: string; body?: unknown; cookies?: Record<string, string> } = {},
+  init: {
+    method?: string;
+    body?: unknown;
+    cookies?: Record<string, string>;
+    // CSRF 検証テスト用: 明示的に null を渡せば Origin/Referer ヘッダを付けない。
+    // 未指定 (undefined) の場合は url のオリジンと同じ値を付与し、通常の同一オリジン要求として扱う。
+    origin?: string | null;
+    referer?: string | null;
+    // レートリミットテスト用の `x-forwarded-for` ヘッダ。指定しない限り未設定（= IP 不明扱い）。
+    ip?: string;
+  } = {},
 ): Request {
+  const u = new URL(url);
+  // host は Web Standard の Forbidden header で Headers から設定できないため、
+  // CSRF 判定側は req.url から URL().host で取り出すフォールバックを使う。
   const headers = new Headers({ "content-type": "application/json" });
+  const defaultOrigin = `${u.protocol}//${u.host}`;
+  if (init.origin === null) {
+    // 明示的に省略
+  } else {
+    headers.set("origin", init.origin ?? defaultOrigin);
+  }
+  if (init.referer === null) {
+    // 明示的に省略
+  } else if (init.referer !== undefined) {
+    headers.set("referer", init.referer);
+  }
   if (init.cookies) {
     const cookieHeader = Object.entries(init.cookies)
       .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
       .join("; ");
     headers.set("cookie", cookieHeader);
+  }
+  if (init.ip) {
+    headers.set("x-forwarded-for", init.ip);
   }
   return new Request(url, {
     method: init.method ?? "GET",

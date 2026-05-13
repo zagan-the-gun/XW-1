@@ -1,17 +1,25 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import {
+  forbiddenResponse,
+  isAuthorizedForRoom,
+  isSameOriginRequest,
+  unauthorizedResponse,
+} from "@/lib/room-auth-server";
 
 // "Jump" by clicking a queue row: rewrite statuses so that everything before
 // the target becomes PLAYED and the target itself + everything after become
 // QUEUED. The actual playback start is driven by the client (currentIndex +
 // emit("play")); this endpoint only owns the persistent queue state.
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ slug: string; trackId: string }> },
 ) {
+  if (!isSameOriginRequest(req)) return forbiddenResponse();
   const { slug, trackId } = await params;
   const room = await prisma.room.findUnique({ where: { slug } });
   if (!room) return NextResponse.json({ error: "Room not found" }, { status: 404 });
+  if (!(await isAuthorizedForRoom(slug, room.passcode))) return unauthorizedResponse();
 
   const target = await prisma.track.findFirst({
     where: { id: trackId, roomId: room.id },

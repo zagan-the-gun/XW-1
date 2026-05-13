@@ -4,6 +4,16 @@ export function passcodeCookieName(slug: string) {
   return `xw_passcode_${slug}`;
 }
 
+// HTTPS 終端配下でのみ Secure 属性を付ける。
+// `COOKIE_SECURE` で明示優先、未指定時は NODE_ENV=production を真値として扱う。
+// 開発環境（http://localhost）で Secure を付けるとブラウザに保存されないため必ず外す。
+function isSecureCookieEnv(): boolean {
+  const explicit = process.env.COOKIE_SECURE;
+  if (explicit === "true") return true;
+  if (explicit === "false") return false;
+  return process.env.NODE_ENV === "production";
+}
+
 // Socket.io の handshake.headers.cookie をパースするため自前で用意。
 // next/headers の cookies() は API Route / SSR では使えるが Socket 側では使えない。
 export function parseCookieHeader(header: string | undefined | null): Record<string, string> {
@@ -43,10 +53,13 @@ export function buildSetPasscodeCookie(slug: string, passcode: string) {
     "SameSite=Lax",
     `Max-Age=${PASSCODE_COOKIE_MAX_AGE_SEC}`,
   ];
+  if (isSecureCookieEnv()) attrs.push("Secure");
   return attrs.join("; ");
 }
 
 export function buildClearPasscodeCookie(slug: string) {
   const name = passcodeCookieName(slug);
-  return [`${name}=`, "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"].join("; ");
+  const attrs = [`${name}=`, "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=0"];
+  if (isSecureCookieEnv()) attrs.push("Secure");
+  return attrs.join("; ");
 }

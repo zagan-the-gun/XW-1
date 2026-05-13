@@ -109,7 +109,7 @@ Socket は全ルームで常時接続。
 - `pause` → `isPlaying=false`
 - `skip` → `handleEnded()` を呼び出し（誰が押しても全員進む）
 - `settings_changed` → `room.loopPlayback` / `room.shufflePlayback` を受け取った分だけ更新（独立フラグなので boolean プロパティが省略されたものは触らない）
-- `passcode_changed` → 他の参加者がパスコードを追加/再生成/削除した通知。**自動追従**（案A）のため、受信側は自分の Cookie を更新する (`POST /api/rooms/[slug]/auth` で新パスコードをセット、または `DELETE` で削除) → `passcode` state を差し替え → トースト表示。これにより既存メンバーは締め出されずに継続操作できる
+- `passcode_changed` → 他の参加者がパスコードを追加/再生成/削除した通知。**サーバが DB から現値を読んで中継するため payload は信頼できる**（クライアントが渡した値は無視される）。**自動追従**（案A）のため、受信側は自分の Cookie を更新する (`POST /api/rooms/[slug]/auth` で新パスコードをセット、または `DELETE` で削除) → `passcode` state を差し替え → トースト表示。これにより既存メンバーは締め出されずに継続操作できる
 - `state_query` → 自分が `listening=true` && `isPlaying=true` で曲があるとき、`playerRef.current.getCurrentTime()` を `state_reply` で返す
 - `state_reply` → `pendingStateQueryRef.current` が立っているときだけ採用、`setCurrentIndex` + 500ms 後に `seekTo`（iframe mount 待ち）。**最初の 1 件で `pendingStateQueryRef` をクリア**して以降は無視（race-based）
 
@@ -252,7 +252,7 @@ isNico
 | 鍵なし | 「パスコードを設定する」ボタン → `PATCH /api/rooms/[slug] { passcode: "regenerate" }` |
 | 鍵あり | 現在のパスコードを大きく表示 + コピーボタン + 「再生成」と「鍵を外す」ボタン |
 
-変更が成功するとレスポンスに新パスコード（または null）が載るので、`onChanged(next)` でルーム側に伝える。ルーム側は state を更新し、`emit("passcode_changed", { passcode: next })` で他の参加者に通知する。
+変更が成功するとレスポンスに新パスコード（または null）が載るので、`onChanged(next)` でルーム側に伝える。ルーム側は state を更新し、`emit("passcode_changed", { roomSlug })` で「変更があった」とだけ通知する（payload に新値は載せない。サーバが DB から現値を読み他メンバーに中継するため）。
 
 ### 自動追従（案A）のフロー
 
@@ -265,7 +265,8 @@ sequenceDiagram
 
     A->>API: PATCH /rooms/slug { passcode: "regenerate" }
     API-->>A: 200 + Set-Cookie (新値)
-    A->>S: emit passcode_changed { passcode: 新値 }
+    A->>S: emit passcode_changed { roomSlug }
+    Note over S: DB を読んで現値を取得
     S-->>B: passcode_changed { passcode: 新値 }
     B->>API: POST /rooms/slug/auth { passcode: 新値 }
     API-->>B: 200 + Set-Cookie (新値)
