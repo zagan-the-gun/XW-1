@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Disc3, Lock, Users, ListMusic, Music2 } from "lucide-react";
+import { Disc3, Users, ListMusic, Music2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { CreateRoomForm } from "@/components/home/CreateRoomForm";
 import { JoinRoomForm } from "@/components/home/JoinRoomForm";
@@ -7,9 +7,12 @@ import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 
 export const dynamic = "force-dynamic";
 
+// 鍵付きルームは「URL を知ってる人だけが入る」想定なので一覧から除外する。
+// 鍵なしルームのみ「最近のルーム」セクションに出す。
 async function getRecentRooms() {
   try {
     return await prisma.room.findMany({
+      where: { passcode: null },
       orderBy: { updatedAt: "desc" },
       take: 10,
       include: { _count: { select: { tracks: true } } },
@@ -93,15 +96,7 @@ export default async function HomePage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="font-medium truncate flex items-center gap-1.5">
-                        {r.passcode && (
-                          <Lock
-                            className="h-3.5 w-3.5 shrink-0 text-primary"
-                            aria-label="パスコード付き"
-                          />
-                        )}
-                        <span className="truncate">{r.name}</span>
-                      </div>
+                      <div className="font-medium truncate">{r.name}</div>
                       <div className="text-xs text-muted-foreground mt-1">
                         {r._count.tracks} 曲
                       </div>

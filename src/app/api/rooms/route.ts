@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { generateRoomSlug } from "@/lib/slug";
 import { RoomPasscodeSchema, generateRoomPasscode } from "@/lib/passcode";
 import { buildSetPasscodeCookie } from "@/lib/room-auth";
+import { forbiddenResponse, isSameOriginRequest } from "@/lib/room-auth-server";
 import { MAX_ROOMS_TOTAL } from "@/lib/constants";
 
 // passcode を直接受け取るのは、作成フォームがクライアント側で事前生成したものを
@@ -11,27 +12,40 @@ import { MAX_ROOMS_TOTAL } from "@/lib/constants";
 // 省略時は withPasscode:true のフォールバックでサーバ側生成する。
 const CreateRoomSchema = z.object({
   name: z.string().min(1).max(80),
-  isPublic: z.boolean().default(false),
   withPasscode: z.boolean().default(false),
   passcode: RoomPasscodeSchema.optional(),
 });
 
+// 一覧 API は鍵なしルーム (passcode IS NULL) のみ返す。
+// 鍵付きルームは「URL を共有された人だけが入る」想定なので、名前と slug を露出させない。
 export async function GET() {
   const rooms = await prisma.room.findMany({
+    where: { passcode: null },
     orderBy: { updatedAt: "desc" },
     take: 50,
     include: { _count: { select: { tracks: true } } },
   });
 
-  const redacted = rooms.map(({ passcode, ...rest }) => ({
-    ...rest,
-    hasPasscode: Boolean(passcode),
+  // 念のため passcode フィールドはレスポンスから落とす（フィルタしているので常に null だが、防御的に）。
+  const redacted = rooms.map((r) => ({
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    hostId: r.hostId,
+    loopPlayback: r.loopPlayback,
+    shufflePlayback: r.shufflePlayback,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    lastOccupiedAt: r.lastOccupiedAt,
+    _count: r._count,
+    hasPasscode: false,
   }));
 
   return NextResponse.json({ rooms: redacted });
 }
 
 export async function POST(req: Request) {
+  if (!isSameOriginRequest(req)) return forbiddenResponse();
   const body = await req.json().catch(() => null);
   const parsed = CreateRoomSchema.safeParse(body);
   if (!parsed.success) {
@@ -66,7 +80,6 @@ export async function POST(req: Request) {
     data: {
       name: parsed.data.name,
       slug,
-      isPublic: parsed.data.isPublic,
       passcode,
     },
   });
@@ -78,7 +91,6 @@ export async function POST(req: Request) {
         name: room.name,
         slug: room.slug,
         hostId: room.hostId,
-        isPublic: room.isPublic,
         loopPlayback: room.loopPlayback,
         createdAt: room.createdAt,
         updatedAt: room.updatedAt,

@@ -38,7 +38,6 @@ model Room {
   name           String
   slug           String       @unique
   hostId         String?
-  isPublic       Boolean      @default(false)
   loopPlayback   Boolean      @default(false)
   shufflePlayback Boolean     @default(false)
   passcode       String?

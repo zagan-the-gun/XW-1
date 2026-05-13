@@ -131,7 +131,7 @@ describe("POST /api/rooms", () => {
 });
 
 describe("GET /api/rooms", () => {
-  it("各 room に hasPasscode が付き、passcode 自体は露出しない", async () => {
+  it("鍵なしルームのみ返り、鍵付きルームは一覧に含まれない", async () => {
     await prisma.room.create({
       data: { name: "open", slug: "open-1234", passcode: null },
     });
@@ -142,14 +142,16 @@ describe("GET /api/rooms", () => {
     const res = await GET();
     const data = await readJson<{ rooms: (RoomRes & { passcode?: string })[] }>(res);
     expect(res.status).toBe(200);
-    expect(data.rooms).toHaveLength(2);
-    for (const r of data.rooms) {
-      expect("passcode" in r).toBe(false);
-      expect(typeof r.hasPasscode).toBe("boolean");
-    }
-    const locked = data.rooms.find((r) => r.slug === "lock-1234");
-    const open = data.rooms.find((r) => r.slug === "open-1234");
-    expect(locked?.hasPasscode).toBe(true);
-    expect(open?.hasPasscode).toBe(false);
+    expect(data.rooms).toHaveLength(1);
+    expect(data.rooms[0].slug).toBe("open-1234");
+    expect(data.rooms[0].hasPasscode).toBe(false);
+    expect("passcode" in data.rooms[0]).toBe(false);
+  });
+
+  it("ルームが 0 件でも空配列を返す", async () => {
+    const res = await GET();
+    const data = await readJson<{ rooms: unknown[] }>(res);
+    expect(res.status).toBe(200);
+    expect(data.rooms).toEqual([]);
   });
 });
