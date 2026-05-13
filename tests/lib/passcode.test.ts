@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PASSCODE_LENGTH,
   RoomPasscodeSchema,
@@ -33,6 +33,18 @@ describe("generateRoomPasscode", () => {
     for (let i = 0; i < 100; i++) set.add(generateRoomPasscode());
     // 衝突率 50% を超えるのは生成ロジックの欠陥（ALPHABET^6 = 30^6 ≈ 7億通り）。
     expect(set.size).toBeGreaterThan(95);
+  });
+
+  describe("CSPRNG 使用の保証", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("Math.random を呼ばない（予測可能な PRNG への退行を防ぐ）", () => {
+      const spy = vi.spyOn(Math, "random");
+      for (let i = 0; i < 50; i++) generateRoomPasscode();
+      expect(spy).not.toHaveBeenCalled();
+    });
   });
 });
 

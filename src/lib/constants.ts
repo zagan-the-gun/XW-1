@@ -34,3 +34,18 @@ export const ROOM_CLEANUP_INTERVAL_MS = (() => {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : 60 * 60 * 1000;
 })();
+
+// /api/rooms/[slug]/auth のブルートフォース緩和用レートリミット閾値。
+// IP + slug 単位で「ウィンドウ秒以内に MAX 回の 401 失敗」が起きたらロック秒間 429 を返す。
+// 8.8 億通り（6 桁 31 文字種）の passcode に対して、デフォルト値（5 回 / 5 分 / 15 分ロック）で
+// 単独 IP の理論最速突破は約 5,900 年。env で上書き可能。
+function readPositiveIntEnv(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : defaultValue;
+}
+
+export const AUTH_RATE_LIMIT_MAX = readPositiveIntEnv("AUTH_RATE_LIMIT_MAX", 5);
+export const AUTH_RATE_LIMIT_WINDOW_SEC = readPositiveIntEnv("AUTH_RATE_LIMIT_WINDOW_SEC", 300);
+export const AUTH_RATE_LIMIT_LOCK_SEC = readPositiveIntEnv("AUTH_RATE_LIMIT_LOCK_SEC", 900);
