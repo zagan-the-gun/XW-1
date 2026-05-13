@@ -1,4 +1,12 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// テスト内で「上限到達」を再現したいので constants を小さい値に差し替える。
+// このファイル内に閉じたモックなので他テストファイルには影響しない。
+vi.mock("@/lib/constants", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/constants")>();
+  return { ...actual, MAX_ROOMS_TOTAL: 2 };
+});
+
 import { GET, POST } from "@/app/api/rooms/route";
 import { prisma } from "@/lib/prisma";
 import { resetDatabase } from "../helpers/db";
@@ -92,6 +100,33 @@ describe("POST /api/rooms", () => {
       }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("ルーム数が MAX_ROOMS_TOTAL 未満なら作成できる", async () => {
+    // mock により上限は 2。1 件作成済み → 2 件目は通る。
+    await prisma.room.create({ data: { name: "first", slug: "limit-001" } });
+    const res = await POST(
+      jsonRequest("http://localhost/api/rooms", {
+        method: "POST",
+        body: { name: "second" },
+      }),
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("ルーム数が MAX_ROOMS_TOTAL に達していると 409 で拒否する", async () => {
+    await prisma.room.create({ data: { name: "first", slug: "limit-101" } });
+    await prisma.room.create({ data: { name: "second", slug: "limit-102" } });
+    const res = await POST(
+      jsonRequest("http://localhost/api/rooms", {
+        method: "POST",
+        body: { name: "third" },
+      }),
+    );
+    expect(res.status).toBe(409);
+    const data = await readJson<{ error: string }>(res);
+    expect(data.error).toContain("2");
+    expect(await prisma.room.count()).toBe(2);
   });
 });
 

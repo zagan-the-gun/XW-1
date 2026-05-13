@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { generateRoomSlug } from "@/lib/slug";
 import { RoomPasscodeSchema, generateRoomPasscode } from "@/lib/passcode";
 import { buildSetPasscodeCookie } from "@/lib/room-auth";
+import { MAX_ROOMS_TOTAL } from "@/lib/constants";
 
 // passcode を直接受け取るのは、作成フォームがクライアント側で事前生成したものを
 // 「表示したパスコードと作ったルームのパスコードが一致」させたいため。
@@ -35,6 +36,16 @@ export async function POST(req: Request) {
   const parsed = CreateRoomSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  // ソフトリミット: count → create 間の競合で 1〜2 件超過する可能性は許容
+  // (DoS 緩和が目的で、厳密な上限ではない)。
+  const roomCount = await prisma.room.count();
+  if (roomCount >= MAX_ROOMS_TOTAL) {
+    return NextResponse.json(
+      { error: `ルームの上限 ${MAX_ROOMS_TOTAL} 件に達しています。しばらく経ってから再度お試しください。` },
+      { status: 409 },
+    );
   }
 
   let slug = generateRoomSlug();
